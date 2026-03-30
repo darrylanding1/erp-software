@@ -1,13 +1,8 @@
 import db from '../config/db.js';
-import { buildScopeWhereClause } from '../middleware/dataScopeMiddleware.js';
-
 export const getLowStockReport = async (req, res) => {
   try {
     const threshold = Number(req.query.threshold || 10);
-    const scope = req.dataScope;
-
-    const productScope = buildScopeWhereClause(scope);
-    const stockScope = buildScopeWhereClause(scope);
+    const { company_id, branch_id, business_unit_id } = req.dataScope || {};
 
     const [rows] = await db.query(
       `
@@ -27,11 +22,17 @@ export const getLowStockReport = async (req, res) => {
         c.name AS category_name,
         COALESCE(SUM(s.total_value), 0) AS stock_value
       FROM products p
-      LEFT JOIN categories c ON p.category_id = c.id
+      LEFT JOIN categories c
+        ON p.category_id = c.id
       LEFT JOIN inventory_stocks s
         ON s.product_id = p.id
-        ${stockScope.sql.replace(/ AND /g, ' AND s.')}
-      WHERE 1 = 1 ${productScope.sql}
+       AND s.company_id = ?
+       AND s.branch_id = ?
+       AND s.business_unit_id = ?
+      WHERE 1 = 1
+        AND p.company_id = ?
+        AND p.branch_id = ?
+        AND p.business_unit_id = ?
       GROUP BY
         p.id,
         p.name,
@@ -43,27 +44,24 @@ export const getLowStockReport = async (req, res) => {
       HAVING COALESCE(SUM(s.quantity), 0) <= ?
       ORDER BY quantity ASC, p.name ASC
       `,
-      [threshold, ...stockScope.values, ...productScope.values, threshold]
+      [
+        threshold,
+        company_id,
+        branch_id,
+        business_unit_id,
+        company_id,
+        branch_id,
+        business_unit_id,
+        threshold,
+      ]
     );
 
-    const totalItems = rows.length;
-    const totalUnits = rows.reduce((sum, item) => sum + Number(item.quantity || 0), 0);
-    const totalStockValue = rows.reduce(
-      (sum, item) => sum + Number(item.stock_value || 0),
-      0
-    );
-
-    res.json({
-      threshold,
-      summary: {
-        totalItems,
-        totalUnits,
-        totalStockValue,
-      },
-      items: rows,
-    });
+    res.json(rows);
   } catch (error) {
     console.error('Get low stock report error:', error);
-    res.status(500).json({ message: 'Failed to fetch low stock report' });
+    res.status(500).json({
+      message: 'Failed to fetch low stock report',
+      error: error.message,
+    });
   }
 };
