@@ -46,9 +46,26 @@ const PORT = process.env.PORT || 5000;
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
+const allowedOrigins = [
+  'http://localhost:5173',
+  process.env.CLIENT_URL,
+  process.env.CORS_ORIGIN,
+].filter(Boolean);
+
 app.use(
   cors({
-    origin: process.env.CLIENT_URL || 'http://localhost:5173',
+    origin(origin, callback) {
+      if (!origin) {
+        return callback(null, true);
+      }
+
+      if (allowedOrigins.includes(origin)) {
+        return callback(null, true);
+      }
+
+      return callback(new Error(`CORS blocked for origin: ${origin}`));
+    },
+    credentials: true,
   })
 );
 
@@ -59,8 +76,8 @@ app.get('/', (_req, res) => {
   res.send('Inventory API is running');
 });
 
-const mountScopedRoute = (path, router) => {
-  app.use(path, authenticate, attachDataScope, router);
+const mountScopedRoute = (routePath, router) => {
+  app.use(routePath, authenticate, attachDataScope, router);
 };
 
 app.use('/api/auth', authRoutes);
@@ -96,6 +113,6 @@ mountScopedRoute('/api/inventory-adjustments', inventoryAdjustmentRoutes);
 mountScopedRoute('/api/inventory-ledger', inventoryLedgerRoutes);
 mountScopedRoute('/api/accounting-periods', accountingPeriodRoutes);
 
-app.listen(PORT, () => {
+app.listen(PORT, '0.0.0.0', () => {
   console.log(`Server running on port ${PORT}`);
 });
