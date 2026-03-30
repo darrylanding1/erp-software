@@ -5,6 +5,11 @@ export const getCustomers = async (params = {}) => {
   return response.data;
 };
 
+export const getCustomerById = async (id) => {
+  const response = await api.get(`/api/customers/${id}`);
+  return response.data;
+};
+
 export const createCustomer = async (payload) => {
   const response = await api.post('/api/customers', payload);
   return response.data;
