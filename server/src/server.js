@@ -48,21 +48,16 @@ const __dirname = path.dirname(__filename);
 
 const allowedOrigins = [
   'http://localhost:5173',
+  'https://erp-software-git-main-bacolodwork-2207s-projects.vercel.app',
   process.env.CLIENT_URL,
   process.env.CORS_ORIGIN,
 ].filter(Boolean);
 
 app.use(
   cors({
-    origin(origin, callback) {
-      if (!origin) {
-        return callback(null, true);
-      }
-
-      if (allowedOrigins.includes(origin)) {
-        return callback(null, true);
-      }
-
+    origin: (origin, callback) => {
+      if (!origin) return callback(null, true);
+      if (allowedOrigins.includes(origin)) return callback(null, true);
       return callback(new Error(`CORS blocked for origin: ${origin}`));
     },
     credentials: true,
