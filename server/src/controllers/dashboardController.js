@@ -4,15 +4,35 @@ import { buildScopeWhereClause } from '../middleware/dataScopeMiddleware.js';
 export const getDashboardData = async (req, res) => {
   try {
     const scope = req.dataScope;
-    const productScope = buildScopeWhereClause(scope);
-    const categoryScope = buildScopeWhereClause(scope);
-    const stockScope = buildScopeWhereClause(scope);
-    const movementScope = buildScopeWhereClause(scope);
+
+    const productScope = buildScopeWhereClause(scope, {
+      company: 'p.company_id',
+      branch: 'p.branch_id',
+      businessUnit: 'p.business_unit_id',
+    });
+
+    const categoryScope = buildScopeWhereClause(scope, {
+      company: 'c.company_id',
+      branch: 'c.branch_id',
+      businessUnit: 'c.business_unit_id',
+    });
+
+    const stockScope = buildScopeWhereClause(scope, {
+      company: 's.company_id',
+      branch: 's.branch_id',
+      businessUnit: 's.business_unit_id',
+    });
+
+    const movementScope = buildScopeWhereClause(scope, {
+      company: 'sm.company_id',
+      branch: 'sm.branch_id',
+      businessUnit: 'sm.business_unit_id',
+    });
 
     const [[productsCount]] = await db.query(
       `
       SELECT COUNT(*) AS totalProducts
-      FROM products
+      FROM products p
       WHERE 1 = 1 ${productScope.sql}
       `,
       productScope.values
@@ -29,7 +49,7 @@ export const getDashboardData = async (req, res) => {
         FROM products p
         LEFT JOIN inventory_stocks s
           ON s.product_id = p.id
-          ${stockScope.sql.replace(/ AND /g, ' AND s.')}
+          ${stockScope.sql}
         WHERE 1 = 1 ${productScope.sql}
         GROUP BY p.id, p.reorder_point
       ) x
@@ -49,7 +69,7 @@ export const getDashboardData = async (req, res) => {
         FROM products p
         LEFT JOIN inventory_stocks s
           ON s.product_id = p.id
-          ${stockScope.sql.replace(/ AND /g, ' AND s.')}
+          ${stockScope.sql}
         WHERE 1 = 1 ${productScope.sql}
         GROUP BY p.id
       ) x
@@ -61,7 +81,7 @@ export const getDashboardData = async (req, res) => {
     const [[categoriesCount]] = await db.query(
       `
       SELECT COUNT(*) AS totalCategories
-      FROM categories
+      FROM categories c
       WHERE 1 = 1 ${categoryScope.sql}
       `,
       categoryScope.values
@@ -95,7 +115,7 @@ export const getDashboardData = async (req, res) => {
       LEFT JOIN categories c ON p.category_id = c.id
       LEFT JOIN inventory_stocks s
         ON s.product_id = p.id
-        ${stockScope.sql.replace(/ AND /g, ' AND s.')}
+        ${stockScope.sql}
       WHERE 1 = 1 ${productScope.sql}
       GROUP BY p.id, p.name, p.sku, c.name, p.reorder_point
       HAVING COALESCE(SUM(s.quantity), 0) <= COALESCE(NULLIF(p.reorder_point, 0), 10)
@@ -121,7 +141,7 @@ export const getDashboardData = async (req, res) => {
         p.sku
       FROM stock_movements sm
       INNER JOIN products p ON sm.product_id = p.id
-      WHERE 1 = 1 ${movementScope.sql.replace(/ AND /g, ' AND sm.')}
+      WHERE 1 = 1 ${movementScope.sql}
       ORDER BY sm.created_at DESC, sm.id DESC
       LIMIT 6
       `,
@@ -139,6 +159,9 @@ export const getDashboardData = async (req, res) => {
     });
   } catch (error) {
     console.error('Get dashboard data error:', error);
-    res.status(500).json({ message: 'Failed to fetch dashboard data' });
+    res.status(500).json({
+      message: 'Failed to fetch dashboard data',
+      error: error.message,
+    });
   }
 };
