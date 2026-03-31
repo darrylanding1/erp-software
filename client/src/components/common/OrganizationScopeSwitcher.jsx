@@ -64,14 +64,16 @@ export default function OrganizationScopeSwitcher() {
   }
 
   return (
-    <div className="rounded-2xl border border-[#ebe4f7] bg-[#fcfaff] p-4">
-      <p className="text-xs uppercase tracking-[0.2em] text-[#8f85aa]">Active scope</p>
+    <div className="rounded-xl bg-[#faf7ff] p-2.5">
+      <p className="text-[10px] uppercase tracking-[0.16em] text-[#9c92b7]">
+        Active Scope
+      </p>
 
-      <div className="mt-3 grid grid-cols-1 gap-3">
+      <div className="mt-2 grid grid-cols-1 gap-2">
         <select
           value={companyId}
           onChange={(e) => handleCompanyChange(e.target.value)}
-          className="rounded-2xl border border-[#ebe4f7] bg-white px-4 py-2.5 text-sm outline-none focus:border-[#9b6bff]"
+          className="min-h-10 rounded-xl border border-[#ece5f8] bg-white px-3 py-2 text-xs text-[#3f345e] outline-none focus:border-[#9b6bff]"
         >
           <option value="">Select company</option>
           {companies.map((company) => (
@@ -84,7 +86,7 @@ export default function OrganizationScopeSwitcher() {
         <select
           value={branchId}
           onChange={(e) => handleBranchChange(e.target.value)}
-          className="rounded-2xl border border-[#ebe4f7] bg-white px-4 py-2.5 text-sm outline-none focus:border-[#9b6bff]"
+          className="min-h-10 rounded-xl border border-[#ece5f8] bg-white px-3 py-2 text-xs text-[#3f345e] outline-none focus:border-[#9b6bff] disabled:bg-[#f8f6fc] disabled:text-[#9e95b7]"
           disabled={!companyId}
         >
           <option value="">All branches</option>
@@ -98,7 +100,7 @@ export default function OrganizationScopeSwitcher() {
         <select
           value={businessUnitId}
           onChange={(e) => setBusinessUnitId(e.target.value)}
-          className="rounded-2xl border border-[#ebe4f7] bg-white px-4 py-2.5 text-sm outline-none focus:border-[#9b6bff]"
+          className="min-h-10 rounded-xl border border-[#ece5f8] bg-white px-3 py-2 text-xs text-[#3f345e] outline-none focus:border-[#9b6bff] disabled:bg-[#f8f6fc] disabled:text-[#9e95b7]"
           disabled={!companyId}
         >
           <option value="">All business units</option>
@@ -113,7 +115,7 @@ export default function OrganizationScopeSwitcher() {
           type="button"
           onClick={handleApply}
           disabled={!companyId}
-          className="rounded-2xl bg-[#6d3fd1] px-4 py-2.5 text-sm font-semibold text-white transition hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-50"
+          className="min-h-10 rounded-xl bg-[#6d3fd1] px-3 py-2 text-xs font-semibold text-white transition hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-50"
         >
           Apply Scope
         </button>

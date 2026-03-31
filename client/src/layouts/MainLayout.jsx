@@ -54,7 +54,6 @@ export default function MainLayout({ children }) {
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const { user, logout, hasAllPermissions, hasAnyPermission } = useAuth();
 
-  // prevent background scroll on mobile
   useEffect(() => {
     if (sidebarOpen) {
       document.body.style.overflow = 'hidden';
@@ -70,8 +69,14 @@ export default function MainLayout({ children }) {
   const visibleMenuItems = useMemo(
     () =>
       menuItems.filter((item) => {
-        if (item.allPermissions?.length) return hasAllPermissions(item.allPermissions);
-        if (item.anyPermissions?.length) return hasAnyPermission(item.anyPermissions);
+        if (item.allPermissions?.length) {
+          return hasAllPermissions(item.allPermissions);
+        }
+
+        if (item.anyPermissions?.length) {
+          return hasAnyPermission(item.anyPermissions);
+        }
+
         return true;
       }),
     [hasAllPermissions, hasAnyPermission]
@@ -83,7 +88,7 @@ export default function MainLayout({ children }) {
   };
 
   const renderNavItems = (mobile = false) => (
-    <ul className="space-y-2">
+    <ul className="space-y-1.5">
       {visibleMenuItems.map((item) => {
         const Icon = item.icon;
 
@@ -94,14 +99,14 @@ export default function MainLayout({ children }) {
               end={item.path === '/'}
               onClick={mobile ? () => setSidebarOpen(false) : undefined}
               className={({ isActive }) =>
-                `flex items-center gap-3 rounded-2xl px-4 py-3 font-medium transition ${
+                `flex items-center gap-3 rounded-2xl px-4 py-3 text-[15px] font-medium transition ${
                   isActive
                     ? 'bg-[#efe4ff] text-[#6d3fd1]'
                     : 'text-[#6e6487] hover:bg-[#f7f2ff]'
                 }`
               }
             >
-              <Icon size={20} />
+              <Icon size={19} />
               <span>{item.name}</span>
             </NavLink>
           </li>
@@ -112,60 +117,48 @@ export default function MainLayout({ children }) {
 
   const sidebarContent = (mobile = false) => (
     <>
-      {/* HEADER */}
-      <div className="border-b border-[#f1ecf8] px-5 py-4">
-        <div className="flex items-start justify-between">
+      <div className="border-b border-[#f1ecf8] px-5 py-5">
+        <div className="flex items-start justify-between gap-3">
           <div>
-            <h1 className="text-lg font-bold text-[#4d3188]">Inventory Pro</h1>
-            <p className="text-xs text-[#8a82a3]">Management Panel</p>
+            <h1 className="text-2xl font-bold text-[#4d3188]">Inventory Pro</h1>
+            <p className="mt-1 text-sm text-[#7c7494]">Management Panel</p>
           </div>
 
-          {mobile && (
+          {mobile ? (
             <button
+              type="button"
               onClick={() => setSidebarOpen(false)}
-              className="p-2 rounded-xl border border-[#f1ecf8]"
+              className="rounded-2xl border border-[#f1ecf8] p-2 text-[#4d3188]"
             >
               <X size={18} />
             </button>
-          )}
+          ) : null}
         </div>
       </div>
 
-      {/* ✅ SMALL CLEAN ACTIVE SCOPE */}
-      <div className="border-b border-[#f1ecf8] px-3 py-2">
-        <p className="text-[10px] uppercase tracking-wide text-[#a59bbf]">
-          User
-        </p>
+      <div className="border-b border-[#f3eef9] px-4 py-3">
+        <p className="text-[10px] uppercase tracking-[0.18em] text-[#a59bbf]">User</p>
+        <p className="mt-1 text-sm font-semibold text-[#4d3188] truncate">{user?.full_name}</p>
+        <p className="text-[11px] text-[#8a82a3] truncate">{user?.email}</p>
 
-        <p className="mt-1 text-sm font-semibold text-[#4d3188] truncate">
-          {user?.full_name}
-        </p>
+        <span className="mt-2 inline-flex rounded-full bg-[#f4efff] px-2 py-0.5 text-[10px] font-semibold text-[#6d3fd1]">
+          {user?.role}
+        </span>
 
-        <p className="text-[11px] text-[#8a82a3] truncate">
-          {user?.email}
-        </p>
-
-        <div className="mt-1 flex items-center justify-between">
-          <span className="rounded-full bg-[#f4efff] px-2 py-[2px] text-[10px] font-semibold text-[#6d3fd1]">
-            {user?.role}
-          </span>
-        </div>
-
-        <div className="mt-1 scale-90 origin-top-left">
+        <div className="mt-2">
           <OrganizationScopeSwitcher />
         </div>
       </div>
 
-      {/* MENU */}
-      <nav className="flex-1 overflow-y-auto px-4 py-5">
+      <nav className="sidebar-scroll flex-1 overflow-y-auto px-4 py-4">
         {renderNavItems(mobile)}
       </nav>
 
-      {/* FOOTER */}
-      <div className="border-t border-[#f1ecf8] p-4">
+      <div className="border-t border-[#f3eef9] p-4">
         <button
+          type="button"
           onClick={handleLogout}
-          className="flex w-full items-center justify-center gap-2 rounded-2xl border border-[#f1ecf8] px-4 py-3 font-semibold text-[#4d3188] hover:bg-[#f7f2ff]"
+          className="flex w-full items-center justify-center gap-2 rounded-2xl border border-[#f1ecf8] px-4 py-3 font-semibold text-[#4d3188] transition hover:bg-[#f7f2ff]"
         >
           <LogOut size={18} />
           Logout
@@ -176,41 +169,46 @@ export default function MainLayout({ children }) {
 
   return (
     <div className="min-h-screen bg-[#f8f5ff]">
-      {/* DESKTOP SIDEBAR */}
-      <aside className="fixed inset-y-0 left-0 z-20 hidden w-72 bg-white border-r border-[#f1ecf8] md:flex flex-col">
+      <aside className="fixed inset-y-0 left-0 z-20 hidden w-72 border-r border-[#f1ecf8] bg-white md:flex md:flex-col">
         {sidebarContent()}
       </aside>
 
-      {/* MOBILE SIDEBAR */}
       {sidebarOpen && (
         <div className="fixed inset-0 z-40 md:hidden">
-          <div
+          <button
+            type="button"
+            aria-label="Close sidebar overlay"
             className="absolute inset-0 bg-black/20"
             onClick={() => setSidebarOpen(false)}
           />
 
-          <aside className="relative z-50 w-72 h-full bg-white shadow-xl flex flex-col">
+          <aside className="relative z-50 flex h-full w-72 max-w-[85vw] flex-col bg-white shadow-xl">
             {sidebarContent(true)}
           </aside>
         </div>
       )}
 
-      {/* CONTENT */}
-      <div className="md:pl-72">
-        <header className="sticky top-0 z-30 bg-white border-b border-[#f1ecf8] md:hidden">
-          <div className="flex items-center justify-between px-4 py-3">
-            <h1 className="font-bold text-[#4d3188]">Inventory</h1>
+      <div className="min-h-screen md:pl-72">
+        <div className="flex min-h-screen min-w-0 flex-col">
+          <header className="sticky top-0 z-30 border-b border-[#f1ecf8] bg-white/90 backdrop-blur md:hidden">
+            <div className="flex items-center justify-between px-4 py-4">
+              <div>
+                <h1 className="text-lg font-bold text-[#4d3188]">Inventory Pro</h1>
+                <p className="text-xs text-[#7c7494]">Management Panel</p>
+              </div>
 
-            <button
-              onClick={() => setSidebarOpen(true)}
-              className="p-2 border border-[#f1ecf8] rounded-xl"
-            >
-              <Menu size={20} />
-            </button>
-          </div>
-        </header>
+              <button
+                type="button"
+                onClick={() => setSidebarOpen(true)}
+                className="rounded-2xl border border-[#f1ecf8] p-2 text-[#4d3188]"
+              >
+                <Menu size={20} />
+              </button>
+            </div>
+          </header>
 
-        <main className="p-4 sm:p-6">{children}</main>
+          <main className="flex-1 p-4 sm:p-6">{children}</main>
+        </div>
       </div>
     </div>
   );
