@@ -24,10 +24,13 @@ import MrpPlanningPage from './pages/MrpPlanningPage';
 import PurchaseRequisitionsPage from './pages/PurchaseRequisitionsPage';
 import GoodsReceiptsPage from './pages/GoodsReceiptsPage';
 import AccessControlPage from './pages/AccessControlPage';
+import useFormFieldAccessibility from './hooks/useFormFieldAccessibility';
 
 const withLayout = (component) => <MainLayout>{component}</MainLayout>;
 
 function App() {
+  useFormFieldAccessibility();
+
   return (
     <Routes>
       <Route path="/login" element={<LoginPage />} />
