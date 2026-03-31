@@ -117,25 +117,6 @@ export default function MainLayout({ children }) {
 
   const sidebarContent = (mobile = false) => (
     <>
-      <div className="border-b border-[#f1ecf8] px-5 py-5">
-        <div className="flex items-start justify-between gap-3">
-          <div>
-            <h1 className="text-2xl font-bold text-[#4d3188]">Inventory Pro</h1>
-            <p className="mt-1 text-sm text-[#7c7494]">Management Panel</p>
-          </div>
-
-          {mobile ? (
-            <button
-              type="button"
-              onClick={() => setSidebarOpen(false)}
-              className="rounded-2xl border border-[#f1ecf8] p-2 text-[#4d3188]"
-            >
-              <X size={18} />
-            </button>
-          ) : null}
-        </div>
-      </div>
-
       <div className="border-b border-[#f3eef9] px-4 py-3">
         <p className="text-[10px] uppercase tracking-[0.18em] text-[#a59bbf]">User</p>
         <p className="mt-1 text-sm font-semibold text-[#4d3188] truncate">{user?.full_name}</p>
