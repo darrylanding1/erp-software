@@ -7,7 +7,6 @@ import {
   ArrowLeftRight,
   ClipboardList,
   Menu,
-  X,
   User,
   Truck,
   Building2,
@@ -119,8 +118,8 @@ export default function MainLayout({ children }) {
     <>
       <div className="border-b border-[#f3eef9] px-4 py-3">
         <p className="text-[10px] uppercase tracking-[0.18em] text-[#a59bbf]">User</p>
-        <p className="mt-1 text-sm font-semibold text-[#4d3188] truncate">{user?.full_name}</p>
-        <p className="text-[11px] text-[#8a82a3] truncate">{user?.email}</p>
+        <p className="mt-1 truncate text-sm font-semibold text-[#4d3188]">{user?.full_name}</p>
+        <p className="truncate text-[11px] text-[#8a82a3]">{user?.email}</p>
 
         <span className="mt-2 inline-flex rounded-full bg-[#f4efff] px-2 py-0.5 text-[10px] font-semibold text-[#6d3fd1]">
           {user?.role}

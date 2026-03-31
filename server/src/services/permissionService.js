@@ -220,6 +220,9 @@ export const getUserWithPermissions = async (userId) => {
     });
   }
 
+  // User override model:
+  // deny beats allow
+  // allow beats role grant
   for (const row of overrideRows) {
     permissionMap.set(row.permission_code, {
       code: row.permission_code,
@@ -390,22 +393,24 @@ export const replaceUserPermissionOverrides = async (
   overrides = [],
   actorUserId = null
 ) => {
-  const normalizedOverrides = [...new Map(
-    (Array.isArray(overrides) ? overrides : [])
-      .filter(
-        (item) =>
-          item &&
-          item.permission_code &&
-          ['allow', 'deny'].includes(String(item.effect || '').toLowerCase())
-      )
-      .map((item) => [
-        item.permission_code,
-        {
-          permission_code: item.permission_code,
-          effect: String(item.effect).toLowerCase(),
-        },
-      ])
-  ).values()];
+  const normalizedOverrides = [
+    ...new Map(
+      (Array.isArray(overrides) ? overrides : [])
+        .filter(
+          (item) =>
+            item &&
+            item.permission_code &&
+            ['allow', 'deny'].includes(String(item.effect || '').toLowerCase())
+        )
+        .map((item) => [
+          item.permission_code,
+          {
+            permission_code: item.permission_code,
+            effect: String(item.effect).toLowerCase(),
+          },
+        ])
+    ).values(),
+  ];
 
   const [[userRow]] = await connection.query(
     `
