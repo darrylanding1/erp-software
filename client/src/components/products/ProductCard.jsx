@@ -1,3 +1,5 @@
+import PermissionGate from '../auth/PermissionGate';
+
 const badgeClassByStatus = (status) => {
   if (status === 'Out of Stock') return 'bg-red-100 text-red-700';
   if (status === 'Low Stock') return 'bg-[#fff1bf] text-[#8a6500]';
@@ -66,18 +68,24 @@ export default function ProductCard({ product, onEdit, onDelete }) {
           </div>
 
           <div className="mt-4 flex flex-col gap-2 sm:flex-row">
-            <button
-              onClick={() => onEdit(product)}
-              className="rounded-xl bg-[#efe4ff] px-4 py-2 text-sm font-medium text-[#7344d0] hover:bg-[#dcc7ff]"
-            >
-              Edit
-            </button>
-            <button
-              onClick={() => onDelete(product.id)}
-              className="rounded-xl bg-red-100 px-4 py-2 text-sm font-medium text-red-700 hover:bg-red-200"
-            >
-              Delete
-            </button>
+            <PermissionGate permission="products.update">
+              <button
+                type="button"
+                onClick={() => onEdit(product)}
+                className="rounded-xl bg-[#efe4ff] px-4 py-2 text-sm font-medium text-[#7344d0] hover:bg-[#dcc7ff]"
+              >
+                Edit
+              </button>
+            </PermissionGate>
+            <PermissionGate permission="products.delete">
+              <button
+                type="button"
+                onClick={() => onDelete(product.id)}
+                className="rounded-xl bg-red-100 px-4 py-2 text-sm font-medium text-red-700 hover:bg-red-200"
+              >
+                Delete
+              </button>
+            </PermissionGate>
           </div>
         </div>
       </div>

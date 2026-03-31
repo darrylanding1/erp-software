@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from 'react';
 import AppButton from '../common/AppButton';
+import PermissionGate from '../auth/PermissionGate';
 import { createProduct, updateProduct } from '../../services/productService';
 
 const getInitialFormData = () => ({
@@ -185,9 +186,11 @@ export default function ProductForm({
         </div>
 
         {editingProduct && (
-          <AppButton type="button" variant="ghost" size="sm" onClick={handleCancel}>
-            Cancel
-          </AppButton>
+          <PermissionGate permission="products.update">
+            <AppButton type="button" variant="ghost" size="sm" onClick={handleCancel}>
+              Cancel
+            </AppButton>
+          </PermissionGate>
         )}
       </div>
 
@@ -545,9 +548,11 @@ export default function ProductForm({
       </div>
 
       <div className="mt-6 flex w-full flex-col gap-3 sm:w-auto sm:flex-row">
-        <AppButton type="submit" disabled={loading}>
-          {loading ? 'Saving...' : editingProduct ? 'Update Item' : 'Save Item'}
-        </AppButton>
+        <PermissionGate permission={editingProduct ? 'products.update' : 'products.create'}>
+          <AppButton type="submit" disabled={loading}>
+            {loading ? 'Saving...' : editingProduct ? 'Update Item' : 'Save Item'}
+          </AppButton>
+        </PermissionGate>
       </div>
     </form>
   );

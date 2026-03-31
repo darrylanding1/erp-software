@@ -3,6 +3,7 @@ import PageHeader from '../components/common/PageHeader';
 import SectionCard from '../components/common/SectionCard';
 import AppButton from '../components/common/AppButton';
 import EmptyState from '../components/common/EmptyState';
+import PermissionGate from '../components/auth/PermissionGate';
 import { getProducts } from '../services/productService';
 import {
   getCustomers,
@@ -488,9 +489,11 @@ export default function SalesPage() {
               />
 
               <div className="flex gap-3">
-                <AppButton type="submit">
-                  {editingCustomer ? 'Update Customer' : 'Save Customer'}
-                </AppButton>
+                <PermissionGate permission={editingCustomer ? 'customers.update' : 'customers.create'}>
+                  <AppButton type="submit">
+                    {editingCustomer ? 'Update Customer' : 'Save Customer'}
+                  </AppButton>
+                </PermissionGate>
                 {editingCustomer && (
                   <AppButton type="button" variant="secondary" onClick={resetCustomerForm}>
                     Cancel Edit
@@ -553,22 +556,26 @@ export default function SalesPage() {
                         <td className="px-6 py-4">{customer.status}</td>
                         <td className="px-6 py-4">
                           <div className="flex justify-center gap-2">
-                            <AppButton
-                              type="button"
-                              size="sm"
-                              variant="ghost"
-                              onClick={() => handleEditCustomer(customer)}
-                            >
-                              Edit
-                            </AppButton>
-                            <AppButton
-                              type="button"
-                              size="sm"
-                              variant="danger"
-                              onClick={() => handleDeleteCustomer(customer.id)}
-                            >
-                              Delete
-                            </AppButton>
+                            <PermissionGate permission="customers.update">
+                              <AppButton
+                                type="button"
+                                size="sm"
+                                variant="ghost"
+                                onClick={() => handleEditCustomer(customer)}
+                              >
+                                Edit
+                              </AppButton>
+                            </PermissionGate>
+                            <PermissionGate permission="customers.delete">
+                              <AppButton
+                                type="button"
+                                size="sm"
+                                variant="danger"
+                                onClick={() => handleDeleteCustomer(customer.id)}
+                              >
+                                Delete
+                              </AppButton>
+                            </PermissionGate>
                           </div>
                         </td>
                       </tr>
@@ -697,15 +704,19 @@ export default function SalesPage() {
               </div>
 
               <div className="flex flex-wrap gap-3">
-                <AppButton type="button" variant="secondary" onClick={handleAddInvoiceItem}>
-                  Add Item
-                </AppButton>
+                <PermissionGate permission="sales.create">
+                  <AppButton type="button" variant="secondary" onClick={handleAddInvoiceItem}>
+                    Add Item
+                  </AppButton>
+                </PermissionGate>
                 <div className="rounded-2xl bg-[#f8f5ff] px-4 py-3 font-semibold text-[#4d3188]">
                   Invoice Total: {money(invoiceTotal)}
                 </div>
               </div>
 
-              <AppButton type="submit">Post Sales Invoice</AppButton>
+              <PermissionGate permission="sales.create">
+                <AppButton type="submit">Post Sales Invoice</AppButton>
+              </PermissionGate>
             </form>
           </SectionCard>
 
@@ -959,7 +970,9 @@ export default function SalesPage() {
                 onChange={(e) => setPaymentForm((prev) => ({ ...prev, remarks: e.target.value }))}
               />
 
-              <AppButton type="submit">Post Customer Payment</AppButton>
+              <PermissionGate permission="sales.create">
+                <AppButton type="submit">Post Customer Payment</AppButton>
+              </PermissionGate>
             </form>
           </SectionCard>
 

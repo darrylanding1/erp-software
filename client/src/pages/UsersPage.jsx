@@ -10,6 +10,7 @@ import PageHeader from '../components/common/PageHeader';
 import SectionCard from '../components/common/SectionCard';
 import AppButton from '../components/common/AppButton';
 import EmptyState from '../components/common/EmptyState';
+import PermissionGate from '../components/auth/PermissionGate';
 
 const initialForm = {
   full_name: '',
@@ -167,74 +168,78 @@ export default function UsersPage() {
         ]}
       />
 
-      <SectionCard
-        title={editingUser ? 'Edit User' : 'Add User'}
-        subtitle="Create and maintain user records. Passwords are hashed in the backend."
-        action={
-          editingUser ? (
-            <AppButton type="button" onClick={resetForm} variant="ghost" size="sm">
-              Cancel
-            </AppButton>
-          ) : null
-        }
-      >
-        <form onSubmit={handleSubmit} className="space-y-4">
-          <div className="grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-5">
-            <input
-              type="text"
-              placeholder="Full Name"
-              value={form.full_name}
-              onChange={(e) => setForm({ ...form, full_name: e.target.value })}
-              className="rounded-2xl border border-[#ebe4f7] px-4 py-3 outline-none focus:border-[#9b6bff]"
-              required
-            />
+      <PermissionGate anyPermissions={['users.create', 'users.update']}>
+        <SectionCard
+          title={editingUser ? 'Edit User' : 'Add User'}
+          subtitle="Create and maintain user records. Passwords are hashed in the backend."
+          action={
+            editingUser ? (
+              <AppButton type="button" onClick={resetForm} variant="ghost" size="sm">
+                Cancel
+              </AppButton>
+            ) : null
+          }
+        >
+          <form onSubmit={handleSubmit} className="space-y-4">
+            <div className="grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-5">
+              <input
+                type="text"
+                placeholder="Full Name"
+                value={form.full_name}
+                onChange={(e) => setForm({ ...form, full_name: e.target.value })}
+                className="rounded-2xl border border-[#ebe4f7] px-4 py-3 outline-none focus:border-[#9b6bff]"
+                required
+              />
 
-            <input
-              type="email"
-              placeholder="Email"
-              value={form.email}
-              onChange={(e) => setForm({ ...form, email: e.target.value })}
-              className="rounded-2xl border border-[#ebe4f7] px-4 py-3 outline-none focus:border-[#9b6bff]"
-              required
-            />
+              <input
+                type="email"
+                placeholder="Email"
+                value={form.email}
+                onChange={(e) => setForm({ ...form, email: e.target.value })}
+                className="rounded-2xl border border-[#ebe4f7] px-4 py-3 outline-none focus:border-[#9b6bff]"
+                required
+              />
 
-            <select
-              value={form.role_code}
-              onChange={(e) => setForm({ ...form, role_code: e.target.value })}
-              className="rounded-2xl border border-[#ebe4f7] px-4 py-3 outline-none focus:border-[#9b6bff]"
-            >
-              {roles.map((role) => (
-                <option key={role.id} value={role.code}>
-                  {role.name}
-                </option>
-              ))}
-            </select>
+              <select
+                value={form.role_code}
+                onChange={(e) => setForm({ ...form, role_code: e.target.value })}
+                className="rounded-2xl border border-[#ebe4f7] px-4 py-3 outline-none focus:border-[#9b6bff]"
+              >
+                {roles.map((role) => (
+                  <option key={role.id} value={role.code}>
+                    {role.name}
+                  </option>
+                ))}
+              </select>
 
-            <select
-              value={form.status}
-              onChange={(e) => setForm({ ...form, status: e.target.value })}
-              className="rounded-2xl border border-[#ebe4f7] px-4 py-3 outline-none focus:border-[#9b6bff]"
-            >
-              <option value="Active">Active</option>
-              <option value="Inactive">Inactive</option>
-            </select>
+              <select
+                value={form.status}
+                onChange={(e) => setForm({ ...form, status: e.target.value })}
+                className="rounded-2xl border border-[#ebe4f7] px-4 py-3 outline-none focus:border-[#9b6bff]"
+              >
+                <option value="Active">Active</option>
+                <option value="Inactive">Inactive</option>
+              </select>
 
-            <input
-              type="password"
-              placeholder={editingUser ? 'New password (optional)' : 'Password'}
-              value={form.password}
-              onChange={(e) => setForm({ ...form, password: e.target.value })}
-              className="rounded-2xl border border-[#ebe4f7] px-4 py-3 outline-none focus:border-[#9b6bff]"
-              required={!editingUser}
-              minLength={8}
-            />
-          </div>
+              <input
+                type="password"
+                placeholder={editingUser ? 'New password (optional)' : 'Password'}
+                value={form.password}
+                onChange={(e) => setForm({ ...form, password: e.target.value })}
+                className="rounded-2xl border border-[#ebe4f7] px-4 py-3 outline-none focus:border-[#9b6bff]"
+                required={!editingUser}
+                minLength={8}
+              />
+            </div>
 
-          <AppButton type="submit">
-            {editingUser ? 'Update User' : 'Save User'}
-          </AppButton>
-        </form>
-      </SectionCard>
+            <PermissionGate permission={editingUser ? 'users.update' : 'users.create'}>
+              <AppButton type="submit">
+                {editingUser ? 'Update User' : 'Save User'}
+              </AppButton>
+            </PermissionGate>
+          </form>
+        </SectionCard>
+      </PermissionGate>
 
       <SectionCard
         title="User List"
@@ -331,22 +336,26 @@ export default function UsersPage() {
                       </td>
                       <td className="px-6 py-4">
                         <div className="flex gap-2">
-                          <AppButton
-                            type="button"
-                            variant="ghost"
-                            size="sm"
-                            onClick={() => handleEdit(user)}
-                          >
-                            Edit
-                          </AppButton>
-                          <AppButton
-                            type="button"
-                            variant="danger"
-                            size="sm"
-                            onClick={() => handleDelete(user.id)}
-                          >
-                            Delete
-                          </AppButton>
+                          <PermissionGate permission="users.update">
+                            <AppButton
+                              type="button"
+                              variant="ghost"
+                              size="sm"
+                              onClick={() => handleEdit(user)}
+                            >
+                              Edit
+                            </AppButton>
+                          </PermissionGate>
+                          <PermissionGate permission="users.delete">
+                            <AppButton
+                              type="button"
+                              variant="danger"
+                              size="sm"
+                              onClick={() => handleDelete(user.id)}
+                            >
+                              Delete
+                            </AppButton>
+                          </PermissionGate>
                         </div>
                       </td>
                     </tr>

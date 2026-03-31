@@ -3,6 +3,7 @@ import PageHeader from '../components/common/PageHeader';
 import SectionCard from '../components/common/SectionCard';
 import AppButton from '../components/common/AppButton';
 import EmptyState from '../components/common/EmptyState';
+import PermissionGate from '../components/auth/PermissionGate';
 import {
   getSalesOrderMeta,
   getSalesOrders,
@@ -446,12 +447,16 @@ export default function SalesOrdersPage() {
           </div>
 
           <div className="flex flex-wrap gap-3">
-            <AppButton type="button" variant="secondary" onClick={addItemRow}>
-              Add Item
-            </AppButton>
-            <AppButton type="submit">
-              Save Sales Order
-            </AppButton>
+            <PermissionGate permission="sales_orders.create">
+              <AppButton type="button" variant="secondary" onClick={addItemRow}>
+                Add Item
+              </AppButton>
+            </PermissionGate>
+            <PermissionGate permission="sales_orders.create">
+              <AppButton type="submit">
+                Save Sales Order
+              </AppButton>
+            </PermissionGate>
           </div>
         </form>
       </SectionCard>
@@ -585,35 +590,41 @@ export default function SalesOrdersPage() {
 
                   <div className="flex flex-wrap gap-2">
                     {order.status === 'Draft' && (
-                      <AppButton
-                        type="button"
-                        size="sm"
-                        onClick={() => handleApprove(order.id)}
-                      >
-                        Approve
-                      </AppButton>
+                      <PermissionGate permission="sales_orders.update">
+                        <AppButton
+                          type="button"
+                          size="sm"
+                          onClick={() => handleApprove(order.id)}
+                        >
+                          Approve
+                        </AppButton>
+                      </PermissionGate>
                     )}
 
                     {['Draft', 'Approved', 'Partially Invoiced'].includes(order.status) && (
-                      <AppButton
-                        type="button"
-                        size="sm"
-                        variant="danger"
-                        onClick={() => handleCancel(order.id)}
-                      >
-                        Cancel
-                      </AppButton>
+                      <PermissionGate permission="sales_orders.update">
+                        <AppButton
+                          type="button"
+                          size="sm"
+                          variant="danger"
+                          onClick={() => handleCancel(order.id)}
+                        >
+                          Cancel
+                        </AppButton>
+                      </PermissionGate>
                     )}
 
                     {['Approved', 'Partially Invoiced'].includes(order.status) && (
-                      <AppButton
-                        type="button"
-                        size="sm"
-                        variant="secondary"
-                        onClick={() => openInvoicePanel(order)}
-                      >
-                        Create Invoice
-                      </AppButton>
+                      <PermissionGate permission="sales_orders.update">
+                        <AppButton
+                          type="button"
+                          size="sm"
+                          variant="secondary"
+                          onClick={() => openInvoicePanel(order)}
+                        >
+                          Create Invoice
+                        </AppButton>
+                      </PermissionGate>
                     )}
                   </div>
                 </div>
@@ -768,9 +779,11 @@ export default function SalesOrdersPage() {
           </div>
 
           <div className="mt-4 flex flex-wrap gap-3">
-            <AppButton type="button" onClick={handleCreateInvoice}>
-              Confirm Create Invoice
-            </AppButton>
+            <PermissionGate permission="sales_orders.update">
+              <AppButton type="button" onClick={handleCreateInvoice}>
+                Confirm Create Invoice
+              </AppButton>
+            </PermissionGate>
             <AppButton type="button" variant="secondary" onClick={closeInvoicePanel}>
               Close
             </AppButton>

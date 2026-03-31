@@ -9,6 +9,7 @@ import PageHeader from '../components/common/PageHeader';
 import SectionCard from '../components/common/SectionCard';
 import AppButton from '../components/common/AppButton';
 import EmptyState from '../components/common/EmptyState';
+import PermissionGate from '../components/auth/PermissionGate';
 
 const initialForm = {
   name: '',
@@ -153,89 +154,95 @@ export default function SuppliersPage() {
         ]}
       />
 
-      <SectionCard
-        title={editingSupplier ? 'Edit Supplier' : 'Add Supplier'}
-        subtitle="Create and maintain supplier information."
-        action={
-          editingSupplier ? (
-            <AppButton type="button" variant="secondary" onClick={resetForm}>
-              Cancel
-            </AppButton>
-          ) : null
-        }
-      >
-        <form onSubmit={handleSubmit} className="space-y-4">
-          <div className="grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-3">
-            <input
-              type="text"
-              name="name"
-              placeholder="Supplier Name"
-              value={form.name}
-              onChange={handleChange}
-              className={inputClassName}
-              required
-            />
-
-            <input
-              type="text"
-              name="contact_person"
-              placeholder="Contact Person"
-              value={form.contact_person}
-              onChange={handleChange}
-              className={inputClassName}
-            />
-
-            <input
-              type="email"
-              name="email"
-              placeholder="Email"
-              value={form.email}
-              onChange={handleChange}
-              className={inputClassName}
-            />
-
-            <input
-              type="text"
-              name="phone"
-              placeholder="Phone"
-              value={form.phone}
-              onChange={handleChange}
-              className={inputClassName}
-            />
-
-            <input
-              type="text"
-              name="address"
-              placeholder="Address"
-              value={form.address}
-              onChange={handleChange}
-              className={inputClassName}
-            />
-
-            <select
-              name="status"
-              value={form.status}
-              onChange={handleChange}
-              className={inputClassName}
-            >
-              <option value="Active">Active</option>
-              <option value="Inactive">Inactive</option>
-            </select>
-          </div>
-
-          <div className="flex flex-col gap-3 sm:flex-row">
-            <AppButton type="submit">
-              {editingSupplier ? 'Update Supplier' : 'Save Supplier'}
-            </AppButton>
-
-            {editingSupplier && (
+      <PermissionGate anyPermissions={['suppliers.create', 'suppliers.update']}>
+        <SectionCard
+          title={editingSupplier ? 'Edit Supplier' : 'Add Supplier'}
+          subtitle="Create and maintain supplier information."
+          action={
+            editingSupplier ? (
               <AppButton type="button" variant="secondary" onClick={resetForm}>
-                Cancel Edit
+                Cancel
               </AppButton>
-            )}
-          </div>
-        </form>
-      </SectionCard>
+            ) : null
+          }
+        >
+          <form onSubmit={handleSubmit} className="space-y-4">
+            <div className="grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-3">
+              <input
+                type="text"
+                name="name"
+                placeholder="Supplier Name"
+                value={form.name}
+                onChange={handleChange}
+                className={inputClassName}
+                required
+              />
+
+              <input
+                type="text"
+                name="contact_person"
+                placeholder="Contact Person"
+                value={form.contact_person}
+                onChange={handleChange}
+                className={inputClassName}
+              />
+
+              <input
+                type="email"
+                name="email"
+                placeholder="Email"
+                value={form.email}
+                onChange={handleChange}
+                className={inputClassName}
+              />
+
+              <input
+                type="text"
+                name="phone"
+                placeholder="Phone"
+                value={form.phone}
+                onChange={handleChange}
+                className={inputClassName}
+              />
+
+              <input
+                type="text"
+                name="address"
+                placeholder="Address"
+                value={form.address}
+                onChange={handleChange}
+                className={inputClassName}
+              />
+
+              <select
+                name="status"
+                value={form.status}
+                onChange={handleChange}
+                className={inputClassName}
+              >
+                <option value="Active">Active</option>
+                <option value="Inactive">Inactive</option>
+              </select>
+            </div>
+
+            <div className="flex flex-col gap-3 sm:flex-row">
+              <PermissionGate
+                permission={editingSupplier ? 'suppliers.update' : 'suppliers.create'}
+              >
+                <AppButton type="submit">
+                  {editingSupplier ? 'Update Supplier' : 'Save Supplier'}
+                </AppButton>
+              </PermissionGate>
+
+              {editingSupplier && (
+                <AppButton type="button" variant="secondary" onClick={resetForm}>
+                  Cancel Edit
+                </AppButton>
+              )}
+            </div>
+          </form>
+        </SectionCard>
+      </PermissionGate>
 
       <SectionCard
         title="Supplier List"
@@ -333,20 +340,24 @@ export default function SuppliersPage() {
                         </td>
                         <td className="px-6 py-4 text-center">
                           <div className="flex justify-center gap-2">
-                            <AppButton
-                              type="button"
-                              variant="ghost"
-                              onClick={() => handleEdit(supplier)}
-                            >
-                              Edit
-                            </AppButton>
-                            <AppButton
-                              type="button"
-                              variant="danger"
-                              onClick={() => handleDelete(supplier.id)}
-                            >
-                              Delete
-                            </AppButton>
+                            <PermissionGate permission="suppliers.update">
+                              <AppButton
+                                type="button"
+                                variant="ghost"
+                                onClick={() => handleEdit(supplier)}
+                              >
+                                Edit
+                              </AppButton>
+                            </PermissionGate>
+                            <PermissionGate permission="suppliers.delete">
+                              <AppButton
+                                type="button"
+                                variant="danger"
+                                onClick={() => handleDelete(supplier.id)}
+                              >
+                                Delete
+                              </AppButton>
+                            </PermissionGate>
                           </div>
                         </td>
                       </tr>
@@ -363,9 +374,7 @@ export default function SuppliersPage() {
                   >
                     <div className="flex items-start justify-between gap-3">
                       <div>
-                        <h3 className="font-bold text-[#4d3188]">
-                          {supplier.name}
-                        </h3>
+                        <h3 className="font-bold text-[#4d3188]">{supplier.name}</h3>
                         <p className="mt-1 text-sm text-[#7c7494]">
                           {supplier.contact_person || 'No contact person'}
                         </p>
@@ -411,20 +420,24 @@ export default function SuppliersPage() {
                     </div>
 
                     <div className="mt-4 flex flex-col gap-2 sm:flex-row">
-                      <AppButton
-                        type="button"
-                        variant="ghost"
-                        onClick={() => handleEdit(supplier)}
-                      >
-                        Edit
-                      </AppButton>
-                      <AppButton
-                        type="button"
-                        variant="danger"
-                        onClick={() => handleDelete(supplier.id)}
-                      >
-                        Delete
-                      </AppButton>
+                      <PermissionGate permission="suppliers.update">
+                        <AppButton
+                          type="button"
+                          variant="ghost"
+                          onClick={() => handleEdit(supplier)}
+                        >
+                          Edit
+                        </AppButton>
+                      </PermissionGate>
+                      <PermissionGate permission="suppliers.delete">
+                        <AppButton
+                          type="button"
+                          variant="danger"
+                          onClick={() => handleDelete(supplier.id)}
+                        >
+                          Delete
+                        </AppButton>
+                      </PermissionGate>
                     </div>
                   </div>
                 ))}

@@ -1,3 +1,5 @@
+import PermissionGate from '../auth/PermissionGate';
+
 const badgeClassByStatus = (status) => {
   if (status === 'Out of Stock') return 'bg-red-100 text-red-700';
   if (status === 'Low Stock') return 'bg-[#fff1bf] text-[#8a6500]';
@@ -77,18 +79,24 @@ export default function ProductTable({ products, onEdit, onDelete }) {
 
               <td className="px-4 py-4">
                 <div className="flex justify-center gap-2">
-                  <button
-                    onClick={() => onEdit(product)}
-                    className="rounded-xl bg-[#9B8EC7] px-3 py-2 text-sm font-medium text-[#F2EAE0] hover:bg-[#dcc7ff] hover:text-[#000000]"
-                  >
-                    Edit
-                  </button>
-                  <button
-                    onClick={() => onDelete(product.id)}
-                    className="rounded-xl bg-red-100 px-3 py-2 text-sm font-medium text-red-700 hover:bg-red-200"
-                  >
-                    Delete
-                  </button>
+                  <PermissionGate permission="products.update">
+                    <button
+                      type="button"
+                      onClick={() => onEdit(product)}
+                      className="rounded-xl bg-[#9B8EC7] px-3 py-2 text-sm font-medium text-[#F2EAE0] hover:bg-[#dcc7ff] hover:text-[#000000]"
+                    >
+                      Edit
+                    </button>
+                  </PermissionGate>
+                  <PermissionGate permission="products.delete">
+                    <button
+                      type="button"
+                      onClick={() => onDelete(product.id)}
+                      className="rounded-xl bg-red-100 px-3 py-2 text-sm font-medium text-red-700 hover:bg-red-200"
+                    >
+                      Delete
+                    </button>
+                  </PermissionGate>
                 </div>
               </td>
             </tr>

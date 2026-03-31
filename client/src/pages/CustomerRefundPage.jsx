@@ -3,6 +3,7 @@ import PageHeader from '../components/common/PageHeader';
 import SectionCard from '../components/common/SectionCard';
 import AppButton from '../components/common/AppButton';
 import EmptyState from '../components/common/EmptyState';
+import PermissionGate from '../components/auth/PermissionGate';
 import { getCustomers } from '../services/customerService';
 import { getSalesInvoices } from '../services/salesService';
 import {
@@ -273,7 +274,9 @@ export default function CustomerRefundPage() {
             onChange={(e) => setRemarks(e.target.value)}
           />
 
-          <AppButton type="submit">Post Customer Refund</AppButton>
+          <PermissionGate permission="customer_refunds.create">
+            <AppButton type="submit">Post Customer Refund</AppButton>
+          </PermissionGate>
         </form>
       </SectionCard>
 

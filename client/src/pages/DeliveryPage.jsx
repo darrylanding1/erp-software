@@ -3,6 +3,7 @@ import PageHeader from '../components/common/PageHeader';
 import SectionCard from '../components/common/SectionCard';
 import AppButton from '../components/common/AppButton';
 import EmptyState from '../components/common/EmptyState';
+import PermissionGate from '../components/auth/PermissionGate';
 import { getCustomers } from '../services/salesService';
 import { getPurchaseMeta } from '../services/purchaseService';
 import {
@@ -410,7 +411,9 @@ export default function DeliveryPage() {
               </div>
 
               <div className="flex gap-3">
-                <AppButton type="submit">Post Delivery / Goods Issue</AppButton>
+                <PermissionGate permission="deliveries.create">
+                  <AppButton type="submit">Post Delivery / Goods Issue</AppButton>
+                </PermissionGate>
                 <AppButton type="button" variant="secondary" onClick={resetForm}>
                   Clear
                 </AppButton>

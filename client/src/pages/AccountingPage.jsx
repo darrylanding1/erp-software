@@ -3,6 +3,7 @@ import PageHeader from '../components/common/PageHeader';
 import SectionCard from '../components/common/SectionCard';
 import AppButton from '../components/common/AppButton';
 import EmptyState from '../components/common/EmptyState';
+import PermissionGate from '../components/auth/PermissionGate';
 import {
   getChartOfAccounts,
   createAccount,
@@ -477,14 +478,16 @@ export default function AccountingPage() {
                                   >
                                     Edit
                                   </AppButton>
-                                  <AppButton
-                                    type="button"
-                                    variant="danger"
-                                    size="sm"
-                                    onClick={() => handleDeleteAccount(account.id)}
-                                  >
-                                    Delete
-                                  </AppButton>
+                                  <PermissionGate permission="accounting.post">
+                                    <AppButton
+                                      type="button"
+                                      variant="danger"
+                                      size="sm"
+                                      onClick={() => handleDeleteAccount(account.id)}
+                                    >
+                                      Delete
+                                    </AppButton>
+                                  </PermissionGate>
                                 </div>
                               </td>
                             </tr>
@@ -532,14 +535,16 @@ export default function AccountingPage() {
                             >
                               Edit
                             </AppButton>
-                            <AppButton
-                              type="button"
-                              variant="danger"
-                              size="sm"
-                              onClick={() => handleDeleteAccount(account.id)}
-                            >
-                              Delete
-                            </AppButton>
+                            <PermissionGate permission="accounting.post">
+                              <AppButton
+                                type="button"
+                                variant="danger"
+                                size="sm"
+                                onClick={() => handleDeleteAccount(account.id)}
+                              >
+                                Delete
+                              </AppButton>
+                            </PermissionGate>
                           </div>
                         </div>
                       </div>

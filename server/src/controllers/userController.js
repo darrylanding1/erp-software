@@ -152,6 +152,20 @@ export const updateUser = async (req, res) => {
       return res.status(404).json({ message: 'User not found' });
     }
 
+    const isSelf = Number(req.user?.id) === Number(id);
+
+    if (isSelf && status && status !== 'Active') {
+      return res.status(400).json({
+        message: 'You cannot deactivate your own account',
+      });
+    }
+
+    if (isSelf && role_code && role_code !== existingUser.role_code) {
+      return res.status(400).json({
+        message: 'You cannot change your own primary role from the user editor',
+      });
+    }
+
     await connection.beginTransaction();
 
     let sql = `
@@ -221,6 +235,10 @@ export const deleteUser = async (req, res) => {
 
     if (!existingUser) {
       return res.status(404).json({ message: 'User not found' });
+    }
+
+    if (Number(req.user?.id) === Number(id)) {
+      return res.status(400).json({ message: 'You cannot delete your own account' });
     }
 
     const [result] = await db.query('DELETE FROM users WHERE id = ?', [id]);

@@ -3,6 +3,7 @@ import PageHeader from '../components/common/PageHeader';
 import SectionCard from '../components/common/SectionCard';
 import AppButton from '../components/common/AppButton';
 import EmptyState from '../components/common/EmptyState';
+import PermissionGate from '../components/auth/PermissionGate';
 import PurchaseJournalEntriesSection from '../components/purchases/PurchaseJournalEntriesSection';
 import {
   getPurchaseMeta,
@@ -527,53 +528,61 @@ export default function PurchasesPage() {
         fetchApPayments(paymentFilters),
       ]);
 
-      alert('AP payment saved successfully.');
+      alert('AP payment posted successfully.');
     } catch (error) {
-      console.error('Save AP payment failed:', error);
-      alert(error?.response?.data?.message || 'Failed to save AP payment');
+      console.error('Create AP payment failed:', error);
+      alert(error?.response?.data?.message || 'Failed to post AP payment');
     } finally {
       setSavingApPayment(false);
     }
   };
 
-  const statusClasses = (status) => {
+  const money = (value) =>
+    Number(value || 0).toLocaleString(undefined, {
+      minimumFractionDigits: 2,
+      maximumFractionDigits: 2,
+    });
+
+  const statusBadge = (status) => {
     if (status === 'Received' || status === 'Paid') {
       return 'bg-emerald-100 text-emerald-700';
     }
+
     if (status === 'Partial' || status === 'Partially Paid') {
       return 'bg-amber-100 text-amber-700';
     }
+
     if (status === 'Cancelled') {
       return 'bg-rose-100 text-rose-700';
     }
-    return 'bg-violet-100 text-violet-700';
+
+    return 'bg-[#efe4ff] text-[#7344d0]';
   };
 
   return (
     <div className="space-y-4 sm:space-y-5 lg:space-y-6">
       <PageHeader
-        title="Purchases + GR + AP"
-        subtitle="Create purchase orders, receive stock, generate supplier invoices, and post AP disbursements."
+        title="Purchasing"
+        subtitle="Manage purchase orders, goods receipts, supplier invoices, and AP payments."
         stats={[
+          { label: 'PO Total', value: dashboardStats.poTotal },
           { label: 'PO Pending', value: dashboardStats.poPending },
-          { label: 'PO Partial', value: dashboardStats.poPartial },
+          { label: 'PO Partial', value: dashboardStats.poPartial, variant: 'warning' },
           { label: 'PO Received', value: dashboardStats.poReceived },
-          { label: 'AP Open', value: dashboardStats.apOpen },
+          { label: 'AP Open', value: dashboardStats.apOpen, variant: 'warning' },
           { label: 'AP Paid', value: dashboardStats.apPaid },
         ]}
       />
 
       <SectionCard
         title="Create Purchase Order"
-        subtitle="Create supplier purchase orders before warehouse receipt."
+        subtitle="Create a supplier purchase order with one or more item lines."
       >
         <form onSubmit={handleSavePo} className="space-y-4">
           <div className="grid grid-cols-1 gap-4 md:grid-cols-3">
             <select
               value={poForm.supplier_id}
-              onChange={(e) =>
-                setPoForm((prev) => ({ ...prev, supplier_id: e.target.value }))
-              }
+              onChange={(e) => setPoForm((prev) => ({ ...prev, supplier_id: e.target.value }))}
               className="rounded-2xl border border-[#ebe4f7] px-4 py-3 outline-none focus:border-[#9b6bff]"
               required
             >
@@ -588,20 +597,16 @@ export default function PurchasesPage() {
             <input
               type="date"
               value={poForm.order_date}
-              onChange={(e) =>
-                setPoForm((prev) => ({ ...prev, order_date: e.target.value }))
-              }
+              onChange={(e) => setPoForm((prev) => ({ ...prev, order_date: e.target.value }))}
               className="rounded-2xl border border-[#ebe4f7] px-4 py-3 outline-none focus:border-[#9b6bff]"
               required
             />
 
             <input
               type="text"
-              value={poForm.notes}
-              onChange={(e) =>
-                setPoForm((prev) => ({ ...prev, notes: e.target.value }))
-              }
               placeholder="Notes"
+              value={poForm.notes}
+              onChange={(e) => setPoForm((prev) => ({ ...prev, notes: e.target.value }))}
               className="rounded-2xl border border-[#ebe4f7] px-4 py-3 outline-none focus:border-[#9b6bff]"
             />
           </div>
@@ -609,75 +614,74 @@ export default function PurchasesPage() {
           <div className="space-y-3">
             {poForm.items.map((item, index) => (
               <div
-                key={index}
-                className="grid grid-cols-1 gap-3 rounded-2xl border border-[#ebe4f7] bg-[#fcfaff] p-4 md:grid-cols-4"
+                key={`po-line-${index}`}
+                className="rounded-2xl border border-[#ebe4f7] bg-[#fcfaff] p-4"
               >
-                <select
-                  value={item.product_id}
-                  onChange={(e) =>
-                    handlePoLineChange(index, 'product_id', e.target.value)
-                  }
-                  className="rounded-2xl border border-[#ebe4f7] px-4 py-3 outline-none focus:border-[#9b6bff]"
-                  required
-                >
-                  <option value="">Select Product</option>
-                  {products.map((product) => (
-                    <option key={product.id} value={product.id}>
-                      {product.name} ({product.sku})
-                    </option>
-                  ))}
-                </select>
-
-                <input
-                  type="number"
-                  min="1"
-                  placeholder="Quantity"
-                  value={item.quantity}
-                  onChange={(e) =>
-                    handlePoLineChange(index, 'quantity', e.target.value)
-                  }
-                  className="rounded-2xl border border-[#ebe4f7] px-4 py-3 outline-none focus:border-[#9b6bff]"
-                  required
-                />
-
-                <input
-                  type="number"
-                  min="0"
-                  step="0.01"
-                  placeholder="Unit Cost"
-                  value={item.unit_cost}
-                  onChange={(e) =>
-                    handlePoLineChange(index, 'unit_cost', e.target.value)
-                  }
-                  className="rounded-2xl border border-[#ebe4f7] px-4 py-3 outline-none focus:border-[#9b6bff]"
-                  required
-                />
-
-                <div className="flex items-center gap-2">
-                  <div className="flex-1 rounded-2xl bg-white px-4 py-3 text-sm font-semibold text-[#4d3188]">
-                    ₱
-                    {(
-                      (Number(item.quantity) || 0) * (Number(item.unit_cost) || 0)
-                    ).toLocaleString(undefined, {
-                      minimumFractionDigits: 2,
-                      maximumFractionDigits: 2,
-                    })}
-                  </div>
-
-                  <AppButton
-                    type="button"
-                    variant="danger"
-                    onClick={() => handleRemovePoLine(index)}
+                <div className="grid grid-cols-1 gap-4 md:grid-cols-4">
+                  <select
+                    value={item.product_id}
+                    onChange={(e) => handlePoLineChange(index, 'product_id', e.target.value)}
+                    className="rounded-2xl border border-[#ebe4f7] bg-white px-4 py-3 outline-none focus:border-[#9b6bff]"
+                    required
                   >
-                    Remove
-                  </AppButton>
+                    <option value="">Select Product</option>
+                    {products.map((product) => (
+                      <option key={product.id} value={product.id}>
+                        {product.name} ({product.sku})
+                      </option>
+                    ))}
+                  </select>
+
+                  <input
+                    type="number"
+                    min="0"
+                    step="0.01"
+                    placeholder="Quantity"
+                    value={item.quantity}
+                    onChange={(e) => handlePoLineChange(index, 'quantity', e.target.value)}
+                    className="rounded-2xl border border-[#ebe4f7] bg-white px-4 py-3 outline-none focus:border-[#9b6bff]"
+                    required
+                  />
+
+                  <input
+                    type="number"
+                    min="0"
+                    step="0.01"
+                    placeholder="Unit Cost"
+                    value={item.unit_cost}
+                    onChange={(e) => handlePoLineChange(index, 'unit_cost', e.target.value)}
+                    className="rounded-2xl border border-[#ebe4f7] bg-white px-4 py-3 outline-none focus:border-[#9b6bff]"
+                    required
+                  />
+
+                  <div className="flex items-center justify-between rounded-2xl border border-[#ebe4f7] bg-white px-4 py-3">
+                    <div className="text-sm text-[#7c7494]">
+                      Line Total: ₱
+                      {(
+                        (Number(item.quantity) || 0) * (Number(item.unit_cost) || 0)
+                      ).toLocaleString(undefined, {
+                        minimumFractionDigits: 2,
+                        maximumFractionDigits: 2,
+                      })}
+                    </div>
+
+                    <PermissionGate permission="purchases.create">
+                      <AppButton
+                        type="button"
+                        variant="danger"
+                        onClick={() => handleRemovePoLine(index)}
+                      >
+                        Remove
+                      </AppButton>
+                    </PermissionGate>
+                  </div>
                 </div>
               </div>
             ))}
           </div>
 
-          <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-            <div className="rounded-2xl bg-[#f7f2ff] px-4 py-3 text-sm font-semibold text-[#4d3188]">
+          <div className="flex flex-col justify-between gap-4 rounded-2xl border border-[#ebe4f7] bg-[#fcfaff] p-4 sm:flex-row sm:items-center">
+            <div className="text-sm font-semibold text-[#4d3188]">
               PO Total: ₱
               {poTotal.toLocaleString(undefined, {
                 minimumFractionDigits: 2,
@@ -686,12 +690,16 @@ export default function PurchasesPage() {
             </div>
 
             <div className="flex flex-col gap-2 sm:flex-row">
-              <AppButton type="button" variant="ghost" onClick={handleAddPoLine}>
-                Add Line
-              </AppButton>
-              <AppButton type="submit" disabled={savingPo}>
-                {savingPo ? 'Saving PO...' : 'Save Purchase Order'}
-              </AppButton>
+              <PermissionGate permission="purchases.create">
+                <AppButton type="button" variant="ghost" onClick={handleAddPoLine}>
+                  Add Line
+                </AppButton>
+              </PermissionGate>
+              <PermissionGate permission="purchases.create">
+                <AppButton type="submit" disabled={savingPo}>
+                  {savingPo ? 'Saving PO...' : 'Save Purchase Order'}
+                </AppButton>
+              </PermissionGate>
             </div>
           </div>
         </form>
@@ -702,9 +710,11 @@ export default function PurchasesPage() {
           title={`Goods Receipt for ${selectedPo.po_number}`}
           subtitle="Receive ordered stock into a selected warehouse."
           action={
-            <AppButton type="button" variant="ghost" size="sm" onClick={closeReceiptForm}>
-              Cancel
-            </AppButton>
+            <PermissionGate permission="goods_receipts.create">
+              <AppButton type="button" variant="ghost" size="sm" onClick={closeReceiptForm}>
+                Cancel
+              </AppButton>
+            </PermissionGate>
           }
         >
           <form onSubmit={handleSaveReceipt} className="space-y-4">
@@ -720,7 +730,7 @@ export default function PurchasesPage() {
                 <option value="">Select Warehouse</option>
                 {warehouses.map((warehouse) => (
                   <option key={warehouse.id} value={warehouse.id}>
-                    {warehouse.name} ({warehouse.code})
+                    {warehouse.name}
                   </option>
                 ))}
               </select>
@@ -737,63 +747,62 @@ export default function PurchasesPage() {
 
               <input
                 type="text"
+                placeholder="Remarks"
                 value={receiptForm.remarks}
                 onChange={(e) =>
                   setReceiptForm((prev) => ({ ...prev, remarks: e.target.value }))
                 }
-                placeholder="Receipt remarks"
                 className="rounded-2xl border border-[#ebe4f7] px-4 py-3 outline-none focus:border-[#9b6bff]"
               />
             </div>
 
-            <div className="space-y-3">
-              {receiptForm.items.map((item, index) => (
-                <div
-                  key={item.purchase_order_item_id}
-                  className="grid grid-cols-1 gap-3 rounded-2xl border border-[#ebe4f7] bg-[#fcfaff] p-4 md:grid-cols-5"
-                >
-                  <div className="rounded-2xl bg-white px-4 py-3">
-                    <p className="text-xs text-[#7c7494]">Product</p>
-                    <p className="font-semibold text-[#2b2340]">{item.product_name}</p>
-                    <p className="text-xs text-[#7c7494]">{item.sku}</p>
-                  </div>
-
-                  <div className="rounded-2xl bg-white px-4 py-3">
-                    <p className="text-xs text-[#7c7494]">Ordered</p>
-                    <p className="font-semibold text-[#2b2340]">{item.ordered_quantity}</p>
-                  </div>
-
-                  <div className="rounded-2xl bg-white px-4 py-3">
-                    <p className="text-xs text-[#7c7494]">Already Received</p>
-                    <p className="font-semibold text-[#2b2340]">{item.already_received_quantity}</p>
-                  </div>
-
-                  <div className="rounded-2xl bg-white px-4 py-3">
-                    <p className="text-xs text-[#7c7494]">Remaining</p>
-                    <p className="font-semibold text-[#2b2340]">{item.remaining_quantity}</p>
-                  </div>
-
-                  <input
-                    type="number"
-                    min="0"
-                    max={item.remaining_quantity}
-                    placeholder="Receive Qty"
-                    value={item.received_quantity}
-                    onChange={(e) => handleReceiptQtyChange(index, e.target.value)}
-                    className="rounded-2xl border border-[#ebe4f7] px-4 py-3 outline-none focus:border-[#9b6bff]"
-                  />
-                </div>
-              ))}
+            <div className="overflow-x-auto rounded-2xl border border-[#ebe4f7] bg-white">
+              <table className="min-w-full">
+                <thead className="bg-[#f7f2ff]">
+                  <tr className="text-left text-[#4d3188]">
+                    <th className="px-4 py-3">Product</th>
+                    <th className="px-4 py-3">SKU</th>
+                    <th className="px-4 py-3">Ordered</th>
+                    <th className="px-4 py-3">Already Received</th>
+                    <th className="px-4 py-3">Remaining</th>
+                    <th className="px-4 py-3">Receive Now</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-[#ebe4f7]">
+                  {receiptForm.items.map((item, index) => (
+                    <tr key={`receipt-line-${index}`}>
+                      <td className="px-4 py-3">{item.product_name}</td>
+                      <td className="px-4 py-3">{item.sku}</td>
+                      <td className="px-4 py-3">{item.ordered_quantity}</td>
+                      <td className="px-4 py-3">{item.already_received_quantity}</td>
+                      <td className="px-4 py-3">{item.remaining_quantity}</td>
+                      <td className="px-4 py-3">
+                        <input
+                          type="number"
+                          min="0"
+                          max={item.remaining_quantity}
+                          step="0.01"
+                          value={item.received_quantity}
+                          onChange={(e) => handleReceiptQtyChange(index, e.target.value)}
+                          className="w-full rounded-2xl border border-[#ebe4f7] px-4 py-3 outline-none focus:border-[#9b6bff]"
+                        />
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
             </div>
 
-            <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-              <div className="rounded-2xl bg-[#f7f2ff] px-4 py-3 text-sm font-semibold text-[#4d3188]">
+            <div className="flex flex-col justify-between gap-4 rounded-2xl border border-[#ebe4f7] bg-[#fcfaff] p-4 sm:flex-row sm:items-center">
+              <div className="text-sm font-semibold text-[#4d3188]">
                 Total receipt quantity: {totalReceiptQty}
               </div>
 
-              <AppButton type="submit" disabled={savingReceipt}>
-                {savingReceipt ? 'Saving Receipt...' : 'Save Goods Receipt'}
-              </AppButton>
+              <PermissionGate permission="goods_receipts.create">
+                <AppButton type="submit" disabled={savingReceipt}>
+                  {savingReceipt ? 'Saving Receipt...' : 'Save Goods Receipt'}
+                </AppButton>
+              </PermissionGate>
             </div>
           </form>
         </SectionCard>
@@ -801,22 +810,14 @@ export default function PurchasesPage() {
 
       <SectionCard
         title="Create Supplier Invoice / AP Invoice"
-        subtitle="Generate an AP invoice only from received PO quantities that are not yet billed."
+        subtitle="Generate AP invoices from received purchase orders."
       >
         {selectedInvoicePo ? (
           <form onSubmit={handleSaveApInvoice} className="space-y-4">
-            <div className="flex flex-col gap-2 rounded-2xl bg-[#fcfaff] p-4">
-              <h3 className="text-lg font-bold text-[#4d3188]">
-                {selectedInvoicePo.po_number}
-              </h3>
-              <p className="text-sm text-[#7c7494]">
-                Supplier: {selectedInvoicePo.supplier_name}
-              </p>
-            </div>
-
             <div className="grid grid-cols-1 gap-4 md:grid-cols-4">
               <input
                 type="text"
+                placeholder="Supplier Invoice Number"
                 value={apInvoiceForm.supplier_invoice_number}
                 onChange={(e) =>
                   setApInvoiceForm((prev) => ({
@@ -824,7 +825,6 @@ export default function PurchasesPage() {
                     supplier_invoice_number: e.target.value,
                   }))
                 }
-                placeholder="Supplier Invoice Number"
                 className="rounded-2xl border border-[#ebe4f7] px-4 py-3 outline-none focus:border-[#9b6bff]"
                 required
               />
@@ -833,10 +833,7 @@ export default function PurchasesPage() {
                 type="date"
                 value={apInvoiceForm.invoice_date}
                 onChange={(e) =>
-                  setApInvoiceForm((prev) => ({
-                    ...prev,
-                    invoice_date: e.target.value,
-                  }))
+                  setApInvoiceForm((prev) => ({ ...prev, invoice_date: e.target.value }))
                 }
                 className="rounded-2xl border border-[#ebe4f7] px-4 py-3 outline-none focus:border-[#9b6bff]"
                 required
@@ -846,95 +843,77 @@ export default function PurchasesPage() {
                 type="date"
                 value={apInvoiceForm.due_date}
                 onChange={(e) =>
-                  setApInvoiceForm((prev) => ({
-                    ...prev,
-                    due_date: e.target.value,
-                  }))
+                  setApInvoiceForm((prev) => ({ ...prev, due_date: e.target.value }))
                 }
                 className="rounded-2xl border border-[#ebe4f7] px-4 py-3 outline-none focus:border-[#9b6bff]"
               />
 
               <input
                 type="text"
+                placeholder="Remarks"
                 value={apInvoiceForm.remarks}
                 onChange={(e) =>
-                  setApInvoiceForm((prev) => ({
-                    ...prev,
-                    remarks: e.target.value,
-                  }))
+                  setApInvoiceForm((prev) => ({ ...prev, remarks: e.target.value }))
                 }
-                placeholder="Remarks"
                 className="rounded-2xl border border-[#ebe4f7] px-4 py-3 outline-none focus:border-[#9b6bff]"
               />
             </div>
 
-            <div className="space-y-3">
-              {apInvoiceForm.items.map((item, index) => (
-                <div
-                  key={item.purchase_order_item_id}
-                  className="grid grid-cols-1 gap-3 rounded-2xl border border-[#ebe4f7] bg-[#fcfaff] p-4 md:grid-cols-6"
-                >
-                  <div className="rounded-2xl bg-white px-4 py-3">
-                    <p className="text-xs text-[#7c7494]">Product</p>
-                    <p className="font-semibold text-[#2b2340]">{item.product_name}</p>
-                    <p className="text-xs text-[#7c7494]">{item.sku}</p>
-                  </div>
-
-                  <div className="rounded-2xl bg-white px-4 py-3">
-                    <p className="text-xs text-[#7c7494]">Received</p>
-                    <p className="font-semibold text-[#2b2340]">{item.received_quantity}</p>
-                  </div>
-
-                  <div className="rounded-2xl bg-white px-4 py-3">
-                    <p className="text-xs text-[#7c7494]">Already Billed</p>
-                    <p className="font-semibold text-[#2b2340]">{item.billed_quantity}</p>
-                  </div>
-
-                  <div className="rounded-2xl bg-white px-4 py-3">
-                    <p className="text-xs text-[#7c7494]">Available to Bill</p>
-                    <p className="font-semibold text-[#4d3188]">{item.available_to_bill}</p>
-                  </div>
-
-                  <div className="rounded-2xl bg-white px-4 py-3">
-                    <p className="text-xs text-[#7c7494]">Unit Cost</p>
-                    <p className="font-semibold text-[#2b2340]">
-                      ₱
-                      {Number(item.unit_cost).toLocaleString(undefined, {
-                        minimumFractionDigits: 2,
-                        maximumFractionDigits: 2,
-                      })}
-                    </p>
-                  </div>
-
-                  <input
-                    type="number"
-                    min="0"
-                    max={item.available_to_bill}
-                    placeholder="Invoice Qty"
-                    value={item.invoice_quantity}
-                    onChange={(e) => handleApInvoiceQtyChange(index, e.target.value)}
-                    className="rounded-2xl border border-[#ebe4f7] px-4 py-3 outline-none focus:border-[#9b6bff]"
-                  />
-                </div>
-              ))}
+            <div className="overflow-x-auto rounded-2xl border border-[#ebe4f7] bg-white">
+              <table className="min-w-full">
+                <thead className="bg-[#f7f2ff]">
+                  <tr className="text-left text-[#4d3188]">
+                    <th className="px-4 py-3">Product</th>
+                    <th className="px-4 py-3">SKU</th>
+                    <th className="px-4 py-3">Received</th>
+                    <th className="px-4 py-3">Already Billed</th>
+                    <th className="px-4 py-3">Available</th>
+                    <th className="px-4 py-3">Unit Cost</th>
+                    <th className="px-4 py-3">Bill Now</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-[#ebe4f7]">
+                  {apInvoiceForm.items.map((item, index) => (
+                    <tr key={`ap-line-${index}`}>
+                      <td className="px-4 py-3">{item.product_name}</td>
+                      <td className="px-4 py-3">{item.sku}</td>
+                      <td className="px-4 py-3">{item.received_quantity}</td>
+                      <td className="px-4 py-3">{item.billed_quantity}</td>
+                      <td className="px-4 py-3">{item.available_to_bill}</td>
+                      <td className="px-4 py-3">₱{money(item.unit_cost)}</td>
+                      <td className="px-4 py-3">
+                        <input
+                          type="number"
+                          min="0"
+                          max={item.available_to_bill}
+                          step="0.01"
+                          value={item.invoice_quantity}
+                          onChange={(e) => handleApInvoiceQtyChange(index, e.target.value)}
+                          className="w-full rounded-2xl border border-[#ebe4f7] px-4 py-3 outline-none focus:border-[#9b6bff]"
+                        />
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
             </div>
 
-            <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-              <div className="rounded-2xl bg-[#f7f2ff] px-4 py-3 text-sm font-semibold text-[#4d3188]">
-                AP Invoice Total: ₱
-                {apInvoiceTotal.toLocaleString(undefined, {
-                  minimumFractionDigits: 2,
-                  maximumFractionDigits: 2,
-                })}
+            <div className="flex flex-col justify-between gap-4 rounded-2xl border border-[#ebe4f7] bg-[#fcfaff] p-4 sm:flex-row sm:items-center">
+              <div className="text-sm font-semibold text-[#4d3188]">
+                AP Invoice Total: ₱{money(apInvoiceTotal)}
               </div>
 
               <div className="flex flex-col gap-2 sm:flex-row">
-                <AppButton type="button" variant="ghost" onClick={closeApInvoiceForm}>
-                  Cancel
-                </AppButton>
-                <AppButton type="submit" disabled={savingApInvoice}>
-                  {savingApInvoice ? 'Saving AP Invoice...' : 'Save AP Invoice'}
-                </AppButton>
+                <PermissionGate permission="accounting.post">
+                  <AppButton type="button" variant="ghost" onClick={closeApInvoiceForm}>
+                    Cancel
+                  </AppButton>
+                </PermissionGate>
+                <PermissionGate permission="accounting.post">
+                  <AppButton type="submit" disabled={savingApInvoice}>
+                    {savingApInvoice ? 'Saving AP Invoice...' : 'Save AP Invoice'}
+                  </AppButton>
+                </PermissionGate>
               </div>
             </div>
           </form>
@@ -943,7 +922,7 @@ export default function PurchasesPage() {
             Loading invoiceable purchase orders...
           </div>
         ) : invoiceablePOs.length === 0 ? (
-          <EmptyState message="No invoiceable purchase orders found. Receive stock first before creating supplier invoices." />
+          <EmptyState message="No invoiceable purchase orders found." />
         ) : (
           <div className="grid grid-cols-1 gap-4">
             {invoiceablePOs.map((po) => (
@@ -951,49 +930,45 @@ export default function PurchasesPage() {
                 key={po.id}
                 className="rounded-2xl border border-[#ebe4f7] bg-white p-4 shadow-sm"
               >
-                <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
+                <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
                   <div>
-                    <h3 className="text-lg font-bold text-[#4d3188]">{po.po_number}</h3>
-                    <p className="text-sm text-[#7c7494]">Supplier: {po.supplier_name}</p>
+                    <h3 className="font-bold text-[#4d3188]">{po.po_number}</h3>
+                    <p className="text-sm text-[#7c7494]">
+                      Supplier: {po.supplier_name}
+                    </p>
                     <p className="text-sm text-[#7c7494]">Status: {po.status}</p>
                   </div>
 
-                  <AppButton type="button" onClick={() => openApInvoiceForm(po)}>
-                    Create AP Invoice
-                  </AppButton>
+                  <PermissionGate permission="accounting.post">
+                    <AppButton type="button" onClick={() => openApInvoiceForm(po)}>
+                      Create AP Invoice
+                    </AppButton>
+                  </PermissionGate>
                 </div>
 
                 <div className="mt-4 overflow-x-auto rounded-2xl border border-[#f1ebfb]">
                   <table className="min-w-full">
-                    <thead className="bg-[#f7f2ff]">
+                    <thead className="bg-[#fcfaff]">
                       <tr className="text-left text-[#4d3188]">
                         <th className="px-4 py-3">Product</th>
                         <th className="px-4 py-3">SKU</th>
+                        <th className="px-4 py-3">Ordered</th>
                         <th className="px-4 py-3">Received</th>
                         <th className="px-4 py-3">Already Billed</th>
                         <th className="px-4 py-3">Available to Bill</th>
                         <th className="px-4 py-3">Unit Cost</th>
                       </tr>
                     </thead>
-                    <tbody>
+                    <tbody className="divide-y divide-[#f1ebfb]">
                       {po.items.map((item) => (
-                        <tr key={item.id} className="border-t border-[#ebe4f7]">
-                          <td className="px-4 py-3 font-medium text-[#2b2340]">
-                            {item.product_name}
-                          </td>
+                        <tr key={item.id}>
+                          <td className="px-4 py-3">{item.product_name}</td>
                           <td className="px-4 py-3">{item.sku}</td>
+                          <td className="px-4 py-3">{item.quantity}</td>
                           <td className="px-4 py-3">{item.received_quantity}</td>
                           <td className="px-4 py-3">{item.billed_quantity}</td>
-                          <td className="px-4 py-3 font-semibold text-[#4d3188]">
-                            {item.available_to_bill}
-                          </td>
-                          <td className="px-4 py-3">
-                            ₱
-                            {Number(item.unit_cost || 0).toLocaleString(undefined, {
-                              minimumFractionDigits: 2,
-                              maximumFractionDigits: 2,
-                            })}
-                          </td>
+                          <td className="px-4 py-3">{item.available_to_bill}</td>
+                          <td className="px-4 py-3">₱{money(item.unit_cost)}</td>
                         </tr>
                       ))}
                     </tbody>
@@ -1007,50 +982,46 @@ export default function PurchasesPage() {
 
       {selectedPayableInvoice && (
         <SectionCard
-          title={`Disbursement for ${selectedPayableInvoice.invoice_number}`}
+          title={`AP Payment for ${selectedPayableInvoice.invoice_number}`}
           subtitle="Post payment against an AP invoice and update the remaining balance."
           action={
-            <AppButton type="button" variant="ghost" size="sm" onClick={closePaymentForm}>
-              Cancel
-            </AppButton>
+            <PermissionGate permission="accounting.post">
+              <AppButton type="button" variant="ghost" size="sm" onClick={closePaymentForm}>
+                Cancel
+              </AppButton>
+            </PermissionGate>
           }
         >
           <form onSubmit={handleSavePayment} className="space-y-4">
             <div className="grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-4">
-              <div className="rounded-2xl bg-[#fcfaff] p-4">
-                <p className="text-sm text-[#7c7494]">Supplier</p>
-                <p className="mt-1 font-semibold text-[#2b2340]">
+              <div className="rounded-2xl border border-[#ebe4f7] bg-[#fcfaff] px-4 py-3">
+                <p className="text-xs text-[#7c7494]">Supplier</p>
+                <p className="font-semibold text-[#2b2340]">
                   {selectedPayableInvoice.supplier_name}
                 </p>
               </div>
 
-              <div className="rounded-2xl bg-[#fcfaff] p-4">
-                <p className="text-sm text-[#7c7494]">PO</p>
-                <p className="mt-1 font-semibold text-[#2b2340]">
-                  {selectedPayableInvoice.po_number}
+              <div className="rounded-2xl border border-[#ebe4f7] bg-[#fcfaff] px-4 py-3">
+                <p className="text-xs text-[#7c7494]">Invoice Number</p>
+                <p className="font-semibold text-[#2b2340]">
+                  {selectedPayableInvoice.invoice_number}
                 </p>
               </div>
 
-              <div className="rounded-2xl bg-[#fcfaff] p-4">
-                <p className="text-sm text-[#7c7494]">Invoice Balance</p>
-                <p className="mt-1 font-semibold text-[#4d3188]">
-                  ₱
-                  {Number(selectedPayableInvoice.balance_amount || 0).toLocaleString(undefined, {
-                    minimumFractionDigits: 2,
-                    maximumFractionDigits: 2,
-                  })}
+              <div className="rounded-2xl border border-[#ebe4f7] bg-[#fcfaff] px-4 py-3">
+                <p className="text-xs text-[#7c7494]">Outstanding Balance</p>
+                <p className="font-semibold text-[#2b2340]">
+                  ₱{money(selectedPayableInvoice.balance_amount)}
                 </p>
               </div>
 
-              <div className="rounded-2xl bg-[#fcfaff] p-4">
-                <p className="text-sm text-[#7c7494]">Status</p>
-                <p className="mt-1 font-semibold text-[#2b2340]">
+              <div className="rounded-2xl border border-[#ebe4f7] bg-[#fcfaff] px-4 py-3">
+                <p className="text-xs text-[#7c7494]">Status</p>
+                <p className="font-semibold text-[#2b2340]">
                   {selectedPayableInvoice.status}
                 </p>
               </div>
-            </div>
 
-            <div className="grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-5">
               <input
                 type="date"
                 value={paymentForm.payment_date}
@@ -1067,53 +1038,54 @@ export default function PurchasesPage() {
                   setPaymentForm((prev) => ({ ...prev, payment_method: e.target.value }))
                 }
                 className="rounded-2xl border border-[#ebe4f7] px-4 py-3 outline-none focus:border-[#9b6bff]"
-                required
               >
-                <option value="Cash">Cash</option>
                 <option value="Bank Transfer">Bank Transfer</option>
+                <option value="Cash">Cash</option>
                 <option value="Check">Check</option>
-                <option value="GCash">GCash</option>
-                <option value="Other">Other</option>
               </select>
 
               <input
                 type="text"
+                placeholder="Reference Number"
                 value={paymentForm.reference_number}
                 onChange={(e) =>
-                  setPaymentForm((prev) => ({ ...prev, reference_number: e.target.value }))
+                  setPaymentForm((prev) => ({
+                    ...prev,
+                    reference_number: e.target.value,
+                  }))
                 }
-                placeholder="Reference Number"
                 className="rounded-2xl border border-[#ebe4f7] px-4 py-3 outline-none focus:border-[#9b6bff]"
               />
 
               <input
                 type="number"
-                min="0.01"
+                min="0"
                 step="0.01"
-                max={selectedPayableInvoice.balance_amount}
+                placeholder="Amount Paid"
                 value={paymentForm.amount_paid}
                 onChange={(e) =>
                   setPaymentForm((prev) => ({ ...prev, amount_paid: e.target.value }))
                 }
-                placeholder="Amount Paid"
                 className="rounded-2xl border border-[#ebe4f7] px-4 py-3 outline-none focus:border-[#9b6bff]"
                 required
               />
 
-              <input
-                type="text"
+              <textarea
+                placeholder="Remarks"
                 value={paymentForm.remarks}
                 onChange={(e) =>
                   setPaymentForm((prev) => ({ ...prev, remarks: e.target.value }))
                 }
-                placeholder="Remarks"
-                className="rounded-2xl border border-[#ebe4f7] px-4 py-3 outline-none focus:border-[#9b6bff]"
+                className="rounded-2xl border border-[#ebe4f7] px-4 py-3 outline-none focus:border-[#9b6bff] md:col-span-2 xl:col-span-4"
+                rows={3}
               />
             </div>
 
-            <AppButton type="submit" disabled={savingApPayment}>
-              {savingApPayment ? 'Saving Payment...' : 'Save AP Payment'}
-            </AppButton>
+            <PermissionGate permission="accounting.post">
+              <AppButton type="submit" disabled={savingApPayment}>
+                {savingApPayment ? 'Saving Payment...' : 'Save AP Payment'}
+              </AppButton>
+            </PermissionGate>
           </form>
         </SectionCard>
       )}
@@ -1124,7 +1096,7 @@ export default function PurchasesPage() {
       >
         {loadingPayables ? (
           <div className="rounded-2xl bg-[#fcfaff] p-5 text-sm text-[#7c7494]">
-            Loading payable invoices...
+            Loading payable AP invoices...
           </div>
         ) : payableInvoices.length === 0 ? (
           <EmptyState message="No payable AP invoices found." />
@@ -1135,41 +1107,22 @@ export default function PurchasesPage() {
                 key={invoice.id}
                 className="rounded-2xl border border-[#ebe4f7] bg-white p-4 shadow-sm"
               >
-                <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
+                <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
                   <div>
-                    <div className="flex flex-wrap items-center gap-2">
-                      <h3 className="text-lg font-bold text-[#4d3188]">
-                        {invoice.invoice_number}
-                      </h3>
-                      <span
-                        className={`inline-flex rounded-full px-3 py-1 text-xs font-medium ${statusClasses(
-                          invoice.status
-                        )}`}
-                      >
-                        {invoice.status}
-                      </span>
-                    </div>
-
+                    <h3 className="font-bold text-[#4d3188]">{invoice.invoice_number}</h3>
                     <p className="text-sm text-[#7c7494]">
-                      Supplier Invoice No: {invoice.supplier_invoice_number}
+                      Supplier: {invoice.supplier_name}
                     </p>
-                    <p className="text-sm text-[#7c7494]">Supplier: {invoice.supplier_name}</p>
-                    <p className="text-sm text-[#7c7494]">PO: {invoice.po_number}</p>
+                    <p className="text-sm text-[#7c7494]">
+                      Balance: ₱{money(invoice.balance_amount)}
+                    </p>
                   </div>
 
-                  <div className="flex flex-col gap-2">
-                    <div className="rounded-2xl bg-[#f7f2ff] px-4 py-3 text-sm font-semibold text-[#4d3188]">
-                      Balance: ₱
-                      {Number(invoice.balance_amount || 0).toLocaleString(undefined, {
-                        minimumFractionDigits: 2,
-                        maximumFractionDigits: 2,
-                      })}
-                    </div>
-
+                  <PermissionGate permission="accounting.post">
                     <AppButton type="button" onClick={() => openPaymentForm(invoice)}>
                       Post Payment
                     </AppButton>
-                  </div>
+                  </PermissionGate>
                 </div>
               </div>
             ))}
@@ -1250,90 +1203,68 @@ export default function PurchasesPage() {
               {purchaseOrders.map((po) => (
                 <div
                   key={po.id}
-                  className="rounded-2xl border border-[#ebe4f7] bg-white p-4 shadow-sm sm:rounded-3xl"
+                  className="rounded-2xl border border-[#ebe4f7] bg-white p-4 shadow-sm"
                 >
                   <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
                     <div>
                       <div className="flex flex-wrap items-center gap-2">
-                        <h3 className="text-lg font-bold text-[#4d3188]">
-                          {po.po_number}
-                        </h3>
+                        <h3 className="font-bold text-[#4d3188]">{po.po_number}</h3>
                         <span
-                          className={`inline-flex rounded-full px-3 py-1 text-xs font-medium ${statusClasses(
+                          className={`inline-flex rounded-full px-3 py-1 text-xs font-medium ${statusBadge(
                             po.status
                           )}`}
                         >
                           {po.status}
                         </span>
                       </div>
-
-                      <p className="mt-1 text-sm text-[#7c7494]">Supplier: {po.supplier_name}</p>
-                      <p className="text-sm text-[#7c7494]">
-                        Order Date: {new Date(po.order_date).toLocaleDateString()}
+                      <p className="mt-1 text-sm text-[#7c7494]">
+                        Supplier: {po.supplier_name}
                       </p>
-                      <p className="text-sm text-[#7c7494]">
-                        Total: ₱
-                        {Number(po.total_amount || 0).toLocaleString(undefined, {
-                          minimumFractionDigits: 2,
-                          maximumFractionDigits: 2,
-                        })}
-                      </p>
+                      <p className="text-sm text-[#7c7494]">Order Date: {po.order_date}</p>
+                      <p className="text-sm text-[#7c7494]">Notes: {po.notes || '-'}</p>
                     </div>
 
                     {po.status !== 'Received' && po.status !== 'Cancelled' && (
-                      <AppButton type="button" onClick={() => openReceiptForm(po)}>
-                        Receive to Warehouse
-                      </AppButton>
+                      <PermissionGate permission="goods_receipts.create">
+                        <AppButton type="button" onClick={() => openReceiptForm(po)}>
+                          Receive to Warehouse
+                        </AppButton>
+                      </PermissionGate>
                     )}
                   </div>
 
                   <div className="mt-4 overflow-x-auto rounded-2xl border border-[#f1ebfb]">
                     <table className="min-w-full">
-                      <thead className="bg-[#f7f2ff]">
+                      <thead className="bg-[#fcfaff]">
                         <tr className="text-left text-[#4d3188]">
                           <th className="px-4 py-3">Product</th>
                           <th className="px-4 py-3">SKU</th>
-                          <th className="px-4 py-3">Ordered</th>
+                          <th className="px-4 py-3">Quantity</th>
                           <th className="px-4 py-3">Received</th>
-                          <th className="px-4 py-3">Remaining</th>
                           <th className="px-4 py-3">Unit Cost</th>
+                          <th className="px-4 py-3">Line Total</th>
                         </tr>
                       </thead>
-                      <tbody>
-                        {po.items.map((item) => {
-                          const remaining =
-                            Number(item.quantity) - Number(item.received_quantity || 0);
-
-                          return (
-                            <tr key={item.id} className="border-t border-[#ebe4f7]">
-                              <td className="px-4 py-3 font-medium text-[#2b2340]">
-                                {item.product_name}
-                              </td>
-                              <td className="px-4 py-3">{item.sku}</td>
-                              <td className="px-4 py-3">{item.quantity}</td>
-                              <td className="px-4 py-3">{item.received_quantity}</td>
-                              <td className="px-4 py-3 font-semibold text-[#4d3188]">
-                                {remaining}
-                              </td>
-                              <td className="px-4 py-3">
-                                ₱
-                                {Number(item.unit_cost || 0).toLocaleString(undefined, {
-                                  minimumFractionDigits: 2,
-                                  maximumFractionDigits: 2,
-                                })}
-                              </td>
-                            </tr>
-                          );
-                        })}
+                      <tbody className="divide-y divide-[#f1ebfb]">
+                        {po.items?.map((item) => (
+                          <tr key={item.id}>
+                            <td className="px-4 py-3">{item.product_name}</td>
+                            <td className="px-4 py-3">{item.sku}</td>
+                            <td className="px-4 py-3">{item.quantity}</td>
+                            <td className="px-4 py-3">{item.received_quantity}</td>
+                            <td className="px-4 py-3">₱{money(item.unit_cost)}</td>
+                            <td className="px-4 py-3">
+                              ₱{money(Number(item.quantity) * Number(item.unit_cost))}
+                            </td>
+                          </tr>
+                        ))}
                       </tbody>
                     </table>
                   </div>
 
-                  {po.notes && (
-                    <div className="mt-3 rounded-2xl bg-[#fcfaff] p-3 text-sm text-[#6e6487]">
-                      Notes: {po.notes}
-                    </div>
-                  )}
+                  <div className="mt-4 text-right text-sm font-semibold text-[#4d3188]">
+                    Total: ₱{money(po.total_amount)}
+                  </div>
                 </div>
               ))}
             </div>
@@ -1365,7 +1296,7 @@ export default function PurchasesPage() {
           <div className="grid grid-cols-1 gap-4 md:grid-cols-3">
             <input
               type="text"
-              placeholder="Search GR number, PO number, or supplier"
+              placeholder="Search receipt number, PO, or supplier"
               value={receiptFilters.search}
               onChange={(e) =>
                 setReceiptFilters((prev) => ({ ...prev, search: e.target.value }))
@@ -1394,17 +1325,14 @@ export default function PurchasesPage() {
             <select
               value={receiptFilters.warehouse_id}
               onChange={(e) =>
-                setReceiptFilters((prev) => ({
-                  ...prev,
-                  warehouse_id: e.target.value,
-                }))
+                setReceiptFilters((prev) => ({ ...prev, warehouse_id: e.target.value }))
               }
               className="rounded-2xl border border-[#ebe4f7] px-4 py-3 outline-none focus:border-[#9b6bff]"
             >
               <option value="">All Warehouses</option>
               {warehouses.map((warehouse) => (
                 <option key={warehouse.id} value={warehouse.id}>
-                  {warehouse.name} ({warehouse.code})
+                  {warehouse.name}
                 </option>
               ))}
             </select>
@@ -1417,74 +1345,35 @@ export default function PurchasesPage() {
           ) : goodsReceipts.length === 0 ? (
             <EmptyState message="No goods receipts found." />
           ) : (
-            <div className="grid grid-cols-1 gap-4">
-              {goodsReceipts.map((receipt) => (
-                <div
-                  key={receipt.id}
-                  className="rounded-2xl border border-[#ebe4f7] bg-white p-4 shadow-sm sm:rounded-3xl"
-                >
-                  <div className="flex flex-col gap-2 lg:flex-row lg:items-start lg:justify-between">
-                    <div>
-                      <h3 className="text-lg font-bold text-[#4d3188]">{receipt.gr_number}</h3>
-                      <p className="text-sm text-[#7c7494]">PO: {receipt.po_number}</p>
-                      <p className="text-sm text-[#7c7494]">Supplier: {receipt.supplier_name}</p>
-                      <p className="text-sm text-[#7c7494]">
-                        Warehouse: {receipt.warehouse_name} ({receipt.warehouse_code})
-                      </p>
-                      <p className="text-sm text-[#7c7494]">
-                        Receipt Date: {new Date(receipt.receipt_date).toLocaleDateString()}
-                      </p>
-                    </div>
-                  </div>
-
-                  <div className="mt-4 overflow-x-auto rounded-2xl border border-[#f1ebfb]">
-                    <table className="min-w-full">
-                      <thead className="bg-[#f7f2ff]">
-                        <tr className="text-left text-[#4d3188]">
-                          <th className="px-4 py-3">Product</th>
-                          <th className="px-4 py-3">SKU</th>
-                          <th className="px-4 py-3">Received Qty</th>
-                          <th className="px-4 py-3">Unit Cost</th>
-                          <th className="px-4 py-3">Line Total</th>
-                        </tr>
-                      </thead>
-                      <tbody>
-                        {receipt.items.map((item) => (
-                          <tr key={item.id} className="border-t border-[#ebe4f7]">
-                            <td className="px-4 py-3 font-medium text-[#2b2340]">
-                              {item.product_name}
-                            </td>
-                            <td className="px-4 py-3">{item.sku}</td>
-                            <td className="px-4 py-3 font-semibold text-[#4d3188]">
-                              {item.received_quantity}
-                            </td>
-                            <td className="px-4 py-3">
-                              ₱
-                              {Number(item.unit_cost || 0).toLocaleString(undefined, {
-                                minimumFractionDigits: 2,
-                                maximumFractionDigits: 2,
-                              })}
-                            </td>
-                            <td className="px-4 py-3">
-                              ₱
-                              {Number(item.line_total || 0).toLocaleString(undefined, {
-                                minimumFractionDigits: 2,
-                                maximumFractionDigits: 2,
-                              })}
-                            </td>
-                          </tr>
-                        ))}
-                      </tbody>
-                    </table>
-                  </div>
-
-                  {receipt.remarks && (
-                    <div className="mt-3 rounded-2xl bg-[#fcfaff] p-3 text-sm text-[#6e6487]">
-                      Remarks: {receipt.remarks}
-                    </div>
-                  )}
-                </div>
-              ))}
+            <div className="overflow-x-auto rounded-3xl border border-[#ebe4f7] bg-white shadow-sm">
+              <table className="min-w-full">
+                <thead className="bg-[#f7f2ff]">
+                  <tr className="text-left text-[#4d3188]">
+                    <th className="px-6 py-4">Receipt</th>
+                    <th className="px-6 py-4">PO Number</th>
+                    <th className="px-6 py-4">Supplier</th>
+                    <th className="px-6 py-4">Warehouse</th>
+                    <th className="px-6 py-4">Receipt Date</th>
+                    <th className="px-6 py-4">Total Qty</th>
+                    <th className="px-6 py-4">Remarks</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-[#f1ebfb]">
+                  {goodsReceipts.map((receipt) => (
+                    <tr key={receipt.id}>
+                      <td className="px-6 py-4 font-medium text-[#4d3188]">
+                        {receipt.receipt_number}
+                      </td>
+                      <td className="px-6 py-4">{receipt.po_number}</td>
+                      <td className="px-6 py-4">{receipt.supplier_name}</td>
+                      <td className="px-6 py-4">{receipt.warehouse_name}</td>
+                      <td className="px-6 py-4">{receipt.receipt_date}</td>
+                      <td className="px-6 py-4">{receipt.total_quantity}</td>
+                      <td className="px-6 py-4">{receipt.remarks || '-'}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
             </div>
           )}
         </div>
@@ -1514,7 +1403,7 @@ export default function PurchasesPage() {
           <div className="grid grid-cols-1 gap-4 md:grid-cols-3">
             <input
               type="text"
-              placeholder="Search AP no, supplier invoice no, supplier, or PO"
+              placeholder="Search invoice number or supplier"
               value={apFilters.search}
               onChange={(e) =>
                 setApFilters((prev) => ({ ...prev, search: e.target.value }))
@@ -1559,114 +1448,47 @@ export default function PurchasesPage() {
           ) : apInvoices.length === 0 ? (
             <EmptyState message="No AP invoices found." />
           ) : (
-            <div className="grid grid-cols-1 gap-4">
-              {apInvoices.map((invoice) => (
-                <div
-                  key={invoice.id}
-                  className="rounded-2xl border border-[#ebe4f7] bg-white p-4 shadow-sm"
-                >
-                  <div className="flex flex-col gap-2 lg:flex-row lg:items-start lg:justify-between">
-                    <div>
-                      <div className="flex flex-wrap items-center gap-2">
-                        <h3 className="text-lg font-bold text-[#4d3188]">
-                          {invoice.invoice_number}
-                        </h3>
+            <div className="overflow-x-auto rounded-3xl border border-[#ebe4f7] bg-white shadow-sm">
+              <table className="min-w-full">
+                <thead className="bg-[#f7f2ff]">
+                  <tr className="text-left text-[#4d3188]">
+                    <th className="px-6 py-4">Invoice Number</th>
+                    <th className="px-6 py-4">PO Number</th>
+                    <th className="px-6 py-4">Supplier</th>
+                    <th className="px-6 py-4">Invoice Date</th>
+                    <th className="px-6 py-4">Due Date</th>
+                    <th className="px-6 py-4">Total</th>
+                    <th className="px-6 py-4">Paid</th>
+                    <th className="px-6 py-4">Balance</th>
+                    <th className="px-6 py-4">Status</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-[#f1ebfb]">
+                  {apInvoices.map((invoice) => (
+                    <tr key={invoice.id}>
+                      <td className="px-6 py-4 font-medium text-[#4d3188]">
+                        {invoice.invoice_number}
+                      </td>
+                      <td className="px-6 py-4">{invoice.po_number}</td>
+                      <td className="px-6 py-4">{invoice.supplier_name}</td>
+                      <td className="px-6 py-4">{invoice.invoice_date}</td>
+                      <td className="px-6 py-4">{invoice.due_date || '-'}</td>
+                      <td className="px-6 py-4">₱{money(invoice.total_amount)}</td>
+                      <td className="px-6 py-4">₱{money(invoice.paid_amount)}</td>
+                      <td className="px-6 py-4">₱{money(invoice.balance_amount)}</td>
+                      <td className="px-6 py-4">
                         <span
-                          className={`inline-flex rounded-full px-3 py-1 text-xs font-medium ${statusClasses(
+                          className={`inline-flex rounded-full px-3 py-1 text-xs font-medium ${statusBadge(
                             invoice.status
                           )}`}
                         >
                           {invoice.status}
                         </span>
-                      </div>
-
-                      <p className="text-sm text-[#7c7494]">
-                        Supplier Invoice No: {invoice.supplier_invoice_number}
-                      </p>
-                      <p className="text-sm text-[#7c7494]">PO: {invoice.po_number}</p>
-                      <p className="text-sm text-[#7c7494]">Supplier: {invoice.supplier_name}</p>
-                      <p className="text-sm text-[#7c7494]">
-                        Invoice Date: {new Date(invoice.invoice_date).toLocaleDateString()}
-                      </p>
-                      <p className="text-sm text-[#7c7494]">
-                        Due Date:{' '}
-                        {invoice.due_date
-                          ? new Date(invoice.due_date).toLocaleDateString()
-                          : '-'}
-                      </p>
-                      <p className="text-sm text-[#7c7494]">
-                        Paid: ₱
-                        {Number(invoice.paid_amount || 0).toLocaleString(undefined, {
-                          minimumFractionDigits: 2,
-                          maximumFractionDigits: 2,
-                        })}
-                      </p>
-                      <p className="text-sm text-[#7c7494]">
-                        Balance: ₱
-                        {Number(invoice.balance_amount || 0).toLocaleString(undefined, {
-                          minimumFractionDigits: 2,
-                          maximumFractionDigits: 2,
-                        })}
-                      </p>
-                    </div>
-
-                    <div className="rounded-2xl bg-[#f7f2ff] px-4 py-3 text-sm font-semibold text-[#4d3188]">
-                      Total: ₱
-                      {Number(invoice.total_amount || 0).toLocaleString(undefined, {
-                        minimumFractionDigits: 2,
-                        maximumFractionDigits: 2,
-                      })}
-                    </div>
-                  </div>
-
-                  <div className="mt-4 overflow-x-auto rounded-2xl border border-[#f1ebfb]">
-                    <table className="min-w-full">
-                      <thead className="bg-[#f7f2ff]">
-                        <tr className="text-left text-[#4d3188]">
-                          <th className="px-4 py-3">Product</th>
-                          <th className="px-4 py-3">SKU</th>
-                          <th className="px-4 py-3">Billed Qty</th>
-                          <th className="px-4 py-3">Unit Cost</th>
-                          <th className="px-4 py-3">Line Total</th>
-                        </tr>
-                      </thead>
-                      <tbody>
-                        {invoice.items.map((item) => (
-                          <tr key={item.id} className="border-t border-[#ebe4f7]">
-                            <td className="px-4 py-3 font-medium text-[#2b2340]">
-                              {item.product_name}
-                            </td>
-                            <td className="px-4 py-3">{item.sku}</td>
-                            <td className="px-4 py-3 font-semibold text-[#4d3188]">
-                              {item.billed_quantity}
-                            </td>
-                            <td className="px-4 py-3">
-                              ₱
-                              {Number(item.unit_cost || 0).toLocaleString(undefined, {
-                                minimumFractionDigits: 2,
-                                maximumFractionDigits: 2,
-                              })}
-                            </td>
-                            <td className="px-4 py-3">
-                              ₱
-                              {Number(item.line_total || 0).toLocaleString(undefined, {
-                                minimumFractionDigits: 2,
-                                maximumFractionDigits: 2,
-                              })}
-                            </td>
-                          </tr>
-                        ))}
-                      </tbody>
-                    </table>
-                  </div>
-
-                  {invoice.remarks && (
-                    <div className="mt-3 rounded-2xl bg-[#fcfaff] p-3 text-sm text-[#6e6487]">
-                      Remarks: {invoice.remarks}
-                    </div>
-                  )}
-                </div>
-              ))}
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
             </div>
           )}
         </div>
@@ -1696,7 +1518,7 @@ export default function PurchasesPage() {
           <div className="grid grid-cols-1 gap-4 md:grid-cols-3">
             <input
               type="text"
-              placeholder="Search payment no, reference, invoice, PO, or supplier"
+              placeholder="Search payment number, supplier, or reference"
               value={paymentFilters.search}
               onChange={(e) =>
                 setPaymentFilters((prev) => ({ ...prev, search: e.target.value }))
@@ -1742,56 +1564,42 @@ export default function PurchasesPage() {
           ) : apPayments.length === 0 ? (
             <EmptyState message="No AP payments found." />
           ) : (
-            <div className="grid grid-cols-1 gap-4">
-              {apPayments.map((payment) => (
-                <div
-                  key={payment.id}
-                  className="rounded-2xl border border-[#ebe4f7] bg-white p-4 shadow-sm"
-                >
-                  <div className="flex flex-col gap-2 lg:flex-row lg:items-start lg:justify-between">
-                    <div>
-                      <h3 className="text-lg font-bold text-[#4d3188]">
+            <div className="overflow-x-auto rounded-3xl border border-[#ebe4f7] bg-white shadow-sm">
+              <table className="min-w-full">
+                <thead className="bg-[#f7f2ff]">
+                  <tr className="text-left text-[#4d3188]">
+                    <th className="px-6 py-4">Payment Number</th>
+                    <th className="px-6 py-4">Supplier</th>
+                    <th className="px-6 py-4">Invoice Number</th>
+                    <th className="px-6 py-4">Payment Date</th>
+                    <th className="px-6 py-4">Method</th>
+                    <th className="px-6 py-4">Reference</th>
+                    <th className="px-6 py-4">Amount Paid</th>
+                    <th className="px-6 py-4">Remarks</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-[#f1ebfb]">
+                  {apPayments.map((payment) => (
+                    <tr key={payment.id}>
+                      <td className="px-6 py-4 font-medium text-[#4d3188]">
                         {payment.payment_number}
-                      </h3>
-                      <p className="text-sm text-[#7c7494]">Supplier: {payment.supplier_name}</p>
-                      <p className="text-sm text-[#7c7494]">
-                        AP Invoice: {payment.invoice_number}
-                      </p>
-                      <p className="text-sm text-[#7c7494]">
-                        Supplier Invoice: {payment.supplier_invoice_number}
-                      </p>
-                      <p className="text-sm text-[#7c7494]">PO: {payment.po_number}</p>
-                      <p className="text-sm text-[#7c7494]">
-                        Payment Date: {new Date(payment.payment_date).toLocaleDateString()}
-                      </p>
-                      <p className="text-sm text-[#7c7494]">
-                        Method: {payment.payment_method}
-                      </p>
-                      <p className="text-sm text-[#7c7494]">
-                        Reference: {payment.reference_number || '-'}
-                      </p>
-                    </div>
-
-                    <div className="rounded-2xl bg-[#f7f2ff] px-4 py-3 text-sm font-semibold text-[#4d3188]">
-                      Amount: ₱
-                      {Number(payment.amount_paid || 0).toLocaleString(undefined, {
-                        minimumFractionDigits: 2,
-                        maximumFractionDigits: 2,
-                      })}
-                    </div>
-                  </div>
-
-                  {payment.remarks && (
-                    <div className="mt-3 rounded-2xl bg-[#fcfaff] p-3 text-sm text-[#6e6487]">
-                      Remarks: {payment.remarks}
-                    </div>
-                  )}
-                </div>
-              ))}
+                      </td>
+                      <td className="px-6 py-4">{payment.supplier_name}</td>
+                      <td className="px-6 py-4">{payment.invoice_number}</td>
+                      <td className="px-6 py-4">{payment.payment_date}</td>
+                      <td className="px-6 py-4">{payment.payment_method}</td>
+                      <td className="px-6 py-4">{payment.reference_number || '-'}</td>
+                      <td className="px-6 py-4">₱{money(payment.amount_paid)}</td>
+                      <td className="px-6 py-4">{payment.remarks || '-'}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
             </div>
           )}
         </div>
       </SectionCard>
+
       <PurchaseJournalEntriesSection />
     </div>
   );

@@ -3,6 +3,7 @@ import PageHeader from '../components/common/PageHeader';
 import SectionCard from '../components/common/SectionCard';
 import AppButton from '../components/common/AppButton';
 import EmptyState from '../components/common/EmptyState';
+import PermissionGate from '../components/auth/PermissionGate';
 import {
   getPurchaseRequisitionMeta,
   getPurchaseRequisitions,
@@ -281,9 +282,11 @@ export default function PurchaseRequisitionsPage() {
             </div>
 
             <div className="md:col-span-4">
-              <AppButton type="submit" variant="primary" disabled={saving}>
-                {saving ? 'Processing...' : 'Create PR from MRP Run'}
-              </AppButton>
+              <PermissionGate permission="purchase_requisitions.create">
+                <AppButton type="submit" variant="primary" disabled={saving}>
+                  {saving ? 'Processing...' : 'Create PR from MRP Run'}
+                </AppButton>
+              </PermissionGate>
             </div>
           </form>
         )}
@@ -394,14 +397,16 @@ export default function PurchaseRequisitionsPage() {
                   </div>
 
                   <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
-                    <AppButton
-                      type="button"
-                      variant="secondary"
-                      disabled={saving || selectedRequisition.status !== 'Draft'}
-                      onClick={() => handleSubmit(selectedRequisition.id)}
-                    >
-                      Submit PR
-                    </AppButton>
+                    <PermissionGate permission="purchase_requisitions.create">
+                      <AppButton
+                        type="button"
+                        variant="secondary"
+                        disabled={saving || selectedRequisition.status !== 'Draft'}
+                        onClick={() => handleSubmit(selectedRequisition.id)}
+                      >
+                        Submit PR
+                      </AppButton>
+                    </PermissionGate>
 
                     <AppButton
                       type="button"

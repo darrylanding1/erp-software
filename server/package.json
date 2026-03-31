@@ -7,7 +7,8 @@
     "test": "echo \"No tests specified\"",
     "dev": "nodemon src/server.js",
     "start": "node src/server.js",
-    "seed:admin": "node src/scripts/seedAdmin.js"
+    "seed:admin": "node src/scripts/seedAdmin.js",
+    "seed:rbac": "node src/scripts/seedRbacTemplates.js"
   },
   "keywords": [],
   "author": "",

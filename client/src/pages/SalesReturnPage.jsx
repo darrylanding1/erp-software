@@ -3,6 +3,7 @@ import PageHeader from '../components/common/PageHeader';
 import SectionCard from '../components/common/SectionCard';
 import AppButton from '../components/common/AppButton';
 import EmptyState from '../components/common/EmptyState';
+import PermissionGate from '../components/auth/PermissionGate';
 import { getPurchaseMeta } from '../services/purchaseService';
 import { getSalesInvoices } from '../services/salesService';
 import {
@@ -463,7 +464,9 @@ export default function SalesReturnPage() {
                 </div>
               </div>
 
-              <AppButton type="submit">Post Sales Return</AppButton>
+              <PermissionGate permission="sales_returns.create">
+                <AppButton type="submit">Post Sales Return</AppButton>
+              </PermissionGate>
             </>
           )}
         </form>
@@ -576,7 +579,9 @@ export default function SalesReturnPage() {
                 </div>
               </div>
 
-              <AppButton type="submit">Post AR Credit Memo</AppButton>
+              <PermissionGate permission="sales_returns.create">
+                <AppButton type="submit">Post AR Credit Memo</AppButton>
+              </PermissionGate>
             </>
           )}
         </form>

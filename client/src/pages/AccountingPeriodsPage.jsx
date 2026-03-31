@@ -3,6 +3,7 @@ import PageHeader from '../components/common/PageHeader';
 import SectionCard from '../components/common/SectionCard';
 import AppButton from '../components/common/AppButton';
 import EmptyState from '../components/common/EmptyState';
+import PermissionGate from '../components/auth/PermissionGate';
 import {
   getAccountingPeriods,
   generateAccountingPeriods,
@@ -304,27 +305,33 @@ export default function AccountingPeriodsPage() {
                     </td>
                     <td className="px-4 py-4">
                       <div className="flex flex-wrap justify-center gap-2">
-                        <AppButton
-                          type="button"
-                          variant="secondary"
-                          onClick={() => handleSoftClose(item)}
-                        >
-                          Soft Close
-                        </AppButton>
-                        <AppButton
-                          type="button"
-                          variant="danger"
-                          onClick={() => handleHardClose(item)}
-                        >
-                          Hard Close
-                        </AppButton>
-                        <AppButton
-                          type="button"
-                          variant="ghost"
-                          onClick={() => handleReopen(item)}
-                        >
-                          Reopen
-                        </AppButton>
+                        <PermissionGate permission="accounting_periods.manage">
+                          <AppButton
+                            type="button"
+                            variant="secondary"
+                            onClick={() => handleSoftClose(item)}
+                          >
+                            Soft Close
+                          </AppButton>
+                        </PermissionGate>
+                        <PermissionGate permission="accounting_periods.manage">
+                          <AppButton
+                            type="button"
+                            variant="danger"
+                            onClick={() => handleHardClose(item)}
+                          >
+                            Hard Close
+                          </AppButton>
+                        </PermissionGate>
+                        <PermissionGate permission="accounting_periods.manage">
+                          <AppButton
+                            type="button"
+                            variant="ghost"
+                            onClick={() => handleReopen(item)}
+                          >
+                            Reopen
+                          </AppButton>
+                        </PermissionGate>
                       </div>
                     </td>
                   </tr>

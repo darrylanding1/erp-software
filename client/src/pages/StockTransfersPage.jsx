@@ -183,20 +183,24 @@ export default function StockTransfersPage() {
         ))}
 
         <div className="flex gap-3">
-          <button
-            type="button"
-            onClick={addItem}
-            className="rounded-2xl bg-[#f7f2ff] px-4 py-3 text-[#4d3188] border border-[#ebe4f7]"
-          >
-            Add Item
-          </button>
-          <button
-            type="submit"
-            disabled={loading}
-            className="rounded-2xl bg-[#9b6bff] px-5 py-3 text-white"
-          >
-            {loading ? 'Saving...' : 'Create Transfer'}
-          </button>
+          <PermissionGate permission="inventory.transfer">
+            <button
+              type="button"
+              onClick={addItem}
+              className="rounded-2xl bg-[#f7f2ff] px-4 py-3 text-[#4d3188] border border-[#ebe4f7]"
+            >
+              Add Item
+            </button>
+          </PermissionGate>
+          <PermissionGate permission="inventory.transfer">
+            <button
+              type="submit"
+              disabled={loading}
+              className="rounded-2xl bg-[#9b6bff] px-5 py-3 text-white"
+            >
+              {loading ? 'Saving...' : 'Create Transfer'}
+            </button>
+          </PermissionGate>
         </div>
       </form>
 
@@ -225,13 +229,15 @@ export default function StockTransfersPage() {
                   <td className="px-4 py-3">{row.status}</td>
                   <td className="px-4 py-3">
                     {row.status !== 'Posted' && (
-                      <button
-                        type="button"
-                        onClick={() => handlePost(row.id)}
-                        className="rounded-xl bg-[#4d3188] px-3 py-2 text-white"
-                      >
-                        Post
-                      </button>
+                      <PermissionGate permission="inventory.transfer">
+                        <button
+                          type="button"
+                          onClick={() => handlePost(row.id)}
+                          className="rounded-xl bg-[#4d3188] px-3 py-2 text-white"
+                        >
+                          Post
+                        </button>
+                      </PermissionGate>
                     )}
                   </td>
                 </tr>

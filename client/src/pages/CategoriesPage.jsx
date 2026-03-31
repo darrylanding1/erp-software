@@ -9,6 +9,7 @@ import PageHeader from '../components/common/PageHeader';
 import SectionCard from '../components/common/SectionCard';
 import AppButton from '../components/common/AppButton';
 import EmptyState from '../components/common/EmptyState';
+import PermissionGate from '../components/auth/PermissionGate';
 
 const initialForm = {
   name: '',
@@ -114,44 +115,50 @@ export default function CategoriesPage() {
         stats={[{ label: 'Total', value: categories.length }]}
       />
 
-      <SectionCard
-        title={editingCategory ? 'Edit Category' : 'Add Category'}
-        subtitle="Create and maintain product category records."
-        action={
-          editingCategory ? (
-            <AppButton type="button" variant="ghost" size="sm" onClick={resetForm}>
-              Cancel
-            </AppButton>
-          ) : null
-        }
-      >
-        <form onSubmit={handleSubmit} className="space-y-4">
-          <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
-            <input
-              type="text"
-              placeholder="Category Name"
-              value={form.name}
-              onChange={(e) => setForm({ ...form, name: e.target.value })}
-              className="w-full rounded-2xl border border-[#ebe4f7] px-4 py-3 outline-none transition focus:border-[#9b6bff]"
-              required
-            />
+      <PermissionGate anyPermissions={['categories.create', 'categories.update']}>
+        <SectionCard
+          title={editingCategory ? 'Edit Category' : 'Add Category'}
+          subtitle="Create and maintain product category records."
+          action={
+            editingCategory ? (
+              <AppButton type="button" variant="ghost" size="sm" onClick={resetForm}>
+                Cancel
+              </AppButton>
+            ) : null
+          }
+        >
+          <form onSubmit={handleSubmit} className="space-y-4">
+            <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
+              <input
+                type="text"
+                placeholder="Category Name"
+                value={form.name}
+                onChange={(e) => setForm({ ...form, name: e.target.value })}
+                className="w-full rounded-2xl border border-[#ebe4f7] px-4 py-3 outline-none transition focus:border-[#9b6bff]"
+                required
+              />
 
-            <input
-              type="text"
-              placeholder="Description"
-              value={form.description}
-              onChange={(e) => setForm({ ...form, description: e.target.value })}
-              className="w-full rounded-2xl border border-[#ebe4f7] px-4 py-3 outline-none transition focus:border-[#9b6bff]"
-            />
-          </div>
+              <input
+                type="text"
+                placeholder="Description"
+                value={form.description}
+                onChange={(e) => setForm({ ...form, description: e.target.value })}
+                className="w-full rounded-2xl border border-[#ebe4f7] px-4 py-3 outline-none transition focus:border-[#9b6bff]"
+              />
+            </div>
 
-          <div className="flex flex-col gap-3 sm:flex-row">
-            <AppButton type="submit">
-              {editingCategory ? 'Update Category' : 'Save Category'}
-            </AppButton>
-          </div>
-        </form>
-      </SectionCard>
+            <div className="flex flex-col gap-3 sm:flex-row">
+              <PermissionGate
+                permission={editingCategory ? 'categories.update' : 'categories.create'}
+              >
+                <AppButton type="submit">
+                  {editingCategory ? 'Update Category' : 'Save Category'}
+                </AppButton>
+              </PermissionGate>
+            </div>
+          </form>
+        </SectionCard>
+      </PermissionGate>
 
       <SectionCard
         title="Category List"
@@ -212,20 +219,24 @@ export default function CategoriesPage() {
                         </td>
                         <td className="px-6 py-4 text-center">
                           <div className="flex justify-center gap-2">
-                            <AppButton
-                              type="button"
-                              variant="ghost"
-                              onClick={() => handleEdit(category)}
-                            >
-                              Edit
-                            </AppButton>
-                            <AppButton
-                              type="button"
-                              variant="danger"
-                              onClick={() => handleDelete(category.id)}
-                            >
-                              Delete
-                            </AppButton>
+                            <PermissionGate permission="categories.update">
+                              <AppButton
+                                type="button"
+                                variant="ghost"
+                                onClick={() => handleEdit(category)}
+                              >
+                                Edit
+                              </AppButton>
+                            </PermissionGate>
+                            <PermissionGate permission="categories.delete">
+                              <AppButton
+                                type="button"
+                                variant="danger"
+                                onClick={() => handleDelete(category.id)}
+                              >
+                                Delete
+                              </AppButton>
+                            </PermissionGate>
                           </div>
                         </td>
                       </tr>
@@ -242,12 +253,9 @@ export default function CategoriesPage() {
                   >
                     <div className="flex items-start justify-between gap-3">
                       <div>
-                        <h3 className="font-bold text-[#4d3188]">
-                          {category.name}
-                        </h3>
+                        <h3 className="font-bold text-[#4d3188]">{category.name}</h3>
                         <p className="mt-1 text-sm text-[#7c7494]">
-                          Created:{' '}
-                          {new Date(category.created_at).toLocaleDateString()}
+                          Created: {new Date(category.created_at).toLocaleDateString()}
                         </p>
                       </div>
                     </div>
@@ -260,20 +268,24 @@ export default function CategoriesPage() {
                     </div>
 
                     <div className="mt-4 flex flex-col gap-2 sm:flex-row">
-                      <AppButton
-                        type="button"
-                        variant="ghost"
-                        onClick={() => handleEdit(category)}
-                      >
-                        Edit
-                      </AppButton>
-                      <AppButton
-                        type="button"
-                        variant="danger"
-                        onClick={() => handleDelete(category.id)}
-                      >
-                        Delete
-                      </AppButton>
+                      <PermissionGate permission="categories.update">
+                        <AppButton
+                          type="button"
+                          variant="ghost"
+                          onClick={() => handleEdit(category)}
+                        >
+                          Edit
+                        </AppButton>
+                      </PermissionGate>
+                      <PermissionGate permission="categories.delete">
+                        <AppButton
+                          type="button"
+                          variant="danger"
+                          onClick={() => handleDelete(category.id)}
+                        >
+                          Delete
+                        </AppButton>
+                      </PermissionGate>
                     </div>
                   </div>
                 ))}

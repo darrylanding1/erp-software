@@ -1,53 +1,9 @@
 import { useEffect, useMemo, useState } from 'react';
 import { NavLink } from 'react-router-dom';
-import {
-  LayoutDashboard,
-  Package,
-  Boxes,
-  ArrowLeftRight,
-  ClipboardList,
-  Menu,
-  User,
-  Truck,
-  Building2,
-  BookOpen,
-  FileBarChart2,
-  ShoppingCart,
-  PackageCheck,
-  RotateCcw,
-  ShieldCheck,
-  LogOut,
-  History,
-  FileText,
-  Factory,
-  KeyRound,
-} from 'lucide-react';
+import { Menu, LogOut } from 'lucide-react';
 import { useAuth } from '../contexts/AuthContext';
 import OrganizationScopeSwitcher from '../components/common/OrganizationScopeSwitcher';
-
-const menuItems = [
-  { name: 'Dashboard', path: '/', icon: LayoutDashboard, allPermissions: ['dashboard.view'] },
-  { name: 'Products', path: '/products', icon: Package, allPermissions: ['products.view'] },
-  { name: 'Categories', path: '/categories', icon: Boxes, allPermissions: ['categories.view'] },
-  { name: 'Stock Movements', path: '/movements', icon: ArrowLeftRight, allPermissions: ['inventory.view'] },
-  { name: 'Suppliers', path: '/suppliers', icon: Building2, allPermissions: ['suppliers.view'] },
-  { name: 'Purchases', path: '/purchases', icon: Truck, allPermissions: ['purchases.view'] },
-  { name: 'Purchase Requisitions', path: '/purchase-requisitions', icon: ClipboardList, allPermissions: ['purchase_requisitions.view'] },
-  { name: 'Goods Receipts', path: '/goods-receipts', icon: PackageCheck, allPermissions: ['goods_receipts.view'] },
-  { name: 'Sales', path: '/sales', icon: ShoppingCart, allPermissions: ['sales.view'] },
-  { name: 'Deliveries', path: '/deliveries', icon: PackageCheck, allPermissions: ['deliveries.view'] },
-  { name: 'Sales Returns', path: '/sales-returns', icon: RotateCcw, allPermissions: ['sales_returns.view'] },
-  { name: 'Sales Orders', path: '/sales-orders', icon: FileText, allPermissions: ['sales_orders.view'] },
-  { name: 'Accounting', path: '/accounting', icon: BookOpen, allPermissions: ['accounting.view'] },
-  { name: 'Financial Reports', path: '/financial-reports', icon: FileBarChart2, allPermissions: ['financial_reports.view'] },
-  { name: 'MRP / Replenishment', path: '/mrp', icon: Factory, allPermissions: ['mrp.view'] },
-  { name: 'Reports', path: '/reports', icon: ClipboardList, allPermissions: ['inventory.view'] },
-  { name: 'Accounting Periods', path: '/accounting-periods', icon: FileText, allPermissions: ['accounting_periods.view'] },
-  { name: 'Users', path: '/users', icon: User, allPermissions: ['users.view'] },
-  { name: 'Access Control', path: '/access-control', icon: KeyRound, allPermissions: ['roles.manage'] },
-  { name: 'Audit Trail', path: '/audit-trail', icon: History, allPermissions: ['audit_trails.view'] },
-  { name: 'Customer Refunds', path: '/customer-refunds', icon: ShieldCheck, allPermissions: ['customer_refunds.view'] },
-];
+import { appRoutes } from '../constants/rbacRoutes';
 
 export default function MainLayout({ children }) {
   const [sidebarOpen, setSidebarOpen] = useState(false);
@@ -67,7 +23,7 @@ export default function MainLayout({ children }) {
 
   const visibleMenuItems = useMemo(
     () =>
-      menuItems.filter((item) => {
+      appRoutes.filter((item) => {
         if (item.allPermissions?.length) {
           return hasAllPermissions(item.allPermissions);
         }
@@ -106,7 +62,7 @@ export default function MainLayout({ children }) {
               }
             >
               <Icon size={19} />
-              <span>{item.name}</span>
+              <span>{item.label}</span>
             </NavLink>
           </li>
         );

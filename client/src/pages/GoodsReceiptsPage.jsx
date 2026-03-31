@@ -3,6 +3,7 @@ import PageHeader from '../components/common/PageHeader';
 import SectionCard from '../components/common/SectionCard';
 import AppButton from '../components/common/AppButton';
 import EmptyState from '../components/common/EmptyState';
+import PermissionGate from '../components/auth/PermissionGate';
 import {
   getGoodsReceiptMeta,
   getGoodsReceiptSuggestions,
@@ -323,9 +324,11 @@ export default function GoodsReceiptsPage() {
               <AppButton type="button" variant="secondary" onClick={loadSuggestions}>
                 Refresh Suggestions
               </AppButton>
-              <AppButton type="submit" variant="primary" disabled={saving}>
-                {saving ? 'Creating Draft...' : 'Create Goods Receipt Draft'}
-              </AppButton>
+              <PermissionGate permission="goods_receipts.create">
+                <AppButton type="submit" variant="primary" disabled={saving}>
+                  {saving ? 'Creating Draft...' : 'Create Goods Receipt Draft'}
+                </AppButton>
+              </PermissionGate>
             </div>
           </form>
         )}
@@ -482,14 +485,16 @@ export default function GoodsReceiptsPage() {
                   </div>
 
                   <div>
-                    <AppButton
-                      type="button"
-                      variant="primary"
-                      disabled={saving || selectedGoodsReceipt.status !== 'Draft'}
-                      onClick={() => handlePost(selectedGoodsReceipt.id)}
-                    >
-                      Post Goods Receipt
-                    </AppButton>
+                    <PermissionGate permission="goods_receipts.post">
+                      <AppButton
+                        type="button"
+                        variant="primary"
+                        disabled={saving || selectedGoodsReceipt.status !== 'Draft'}
+                        onClick={() => handlePost(selectedGoodsReceipt.id)}
+                      >
+                        Post Goods Receipt
+                      </AppButton>
+                    </PermissionGate>
                   </div>
 
                   <div className="max-h-[420px] overflow-auto rounded-2xl border border-[#ebe4f7]">

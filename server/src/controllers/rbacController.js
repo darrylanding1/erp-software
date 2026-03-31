@@ -5,11 +5,99 @@ import {
   getPermissionMatrix,
   getRbacUsers,
   getRolesMeta,
+  getRolePermissionCodes,
   getUserPermissionOverrides,
+  getUserRolesDetailed,
   getUserWithPermissions,
   replaceRolePermissions,
   replaceUserPermissionOverrides,
 } from '../services/permissionService.js';
+
+const SENSITIVE_ADMIN_PERMISSIONS = ['roles.manage', 'users.update', 'users.delete'];
+
+const buildEffectivePermissionSet = (rolePermissionCodes = [], overrides = []) => {
+  const permissionMap = new Map();
+
+  for (const code of rolePermissionCodes) {
+    permissionMap.set(code, true);
+  }
+
+  for (const override of overrides) {
+    if (!override?.permission_code) continue;
+    permissionMap.set(override.permission_code, String(override.effect).toLowerCase() === 'allow');
+  }
+
+  return new Set(
+    [...permissionMap.entries()]
+      .filter(([, allowed]) => allowed)
+      .map(([code]) => code)
+  );
+};
+
+const assertActorKeepsCriticalAccessAfterRoleUpdate = async ({
+  actorUserId,
+  roleId,
+  nextPermissionCodes,
+}) => {
+  const actorRoles = await getUserRolesDetailed(actorUserId);
+  const actorOverrides = await getUserPermissionOverrides(actorUserId);
+
+  const mergedRolePermissionCodes = [];
+
+  for (const role of actorRoles) {
+    const permissionCodes =
+      Number(role.id) === Number(roleId)
+        ? nextPermissionCodes
+        : await getRolePermissionCodes(role.id);
+
+    mergedRolePermissionCodes.push(...permissionCodes);
+  }
+
+  const effectivePermissions = buildEffectivePermissionSet(
+    [...new Set(mergedRolePermissionCodes)],
+    actorOverrides
+  );
+
+  const missingCritical = SENSITIVE_ADMIN_PERMISSIONS.filter(
+    (code) => !effectivePermissions.has(code)
+  );
+
+  if (missingCritical.length > 0) {
+    throw new Error(
+      `This change would lock you out of RBAC administration. Missing permissions: ${missingCritical.join(', ')}`
+    );
+  }
+};
+
+const assertActorKeepsCriticalAccessAfterOverrideUpdate = async ({
+  actorUserId,
+  targetUserId,
+  nextOverrides,
+}) => {
+  if (Number(actorUserId) !== Number(targetUserId)) {
+    return;
+  }
+
+  const actorRoles = await getUserRolesDetailed(actorUserId);
+  const rolePermissionSets = await Promise.all(
+    actorRoles.map((role) => getRolePermissionCodes(role.id))
+  );
+
+  const effectivePermissions = buildEffectivePermissionSet(
+    [...new Set(rolePermissionSets.flat())],
+    nextOverrides
+  );
+
+  const missingCritical = SENSITIVE_ADMIN_PERMISSIONS.filter(
+    (code) => !effectivePermissions.has(code)
+  );
+
+  if (missingCritical.length > 0) {
+    throw new Error(
+      `You cannot deny your own critical admin access. Missing permissions: ${missingCritical.join(', ')}`
+    );
+  }
+};
 
 export const getRbacAdminData = async (_req, res) => {
   try {
@@ -44,6 +132,12 @@ export const updateRoleMatrix = async (req, res) => {
     if (!roleId) {
       return res.status(400).json({ message: 'Invalid role id' });
     }
+
+    await assertActorKeepsCriticalAccessAfterRoleUpdate({
+      actorUserId: req.user?.id,
+      roleId,
+      nextPermissionCodes: permissionCodes,
+    });
 
     await connection.beginTransaction();
 
@@ -135,6 +229,12 @@ export const saveUserOverrides = async (req, res) => {
     if (!beforeUser) {
       return res.status(404).json({ message: 'User not found' });
     }
+
+    await assertActorKeepsCriticalAccessAfterOverrideUpdate({
+      actorUserId: req.user?.id,
+      targetUserId: userId,
+      nextOverrides: overrides,
+    });
 
     await connection.beginTransaction();
 
