@@ -3,6 +3,7 @@ import PageHeader from '../components/common/PageHeader';
 import SectionCard from '../components/common/SectionCard';
 import AppButton from '../components/common/AppButton';
 import EmptyState from '../components/common/EmptyState';
+import PermissionGate from '../components/auth/PermissionGate';
 import { getProducts } from '../services/productService';
 import {
   getMovementMeta,
@@ -262,125 +263,127 @@ export default function MovementsPage() {
         title="Transfer Stock"
         subtitle="Move inventory from one warehouse to another while keeping stock movement history."
       >
-        <form onSubmit={handleTransferSubmit} className="space-y-4">
-          <div className="grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-3">
-            <select
-              value={transferForm.product_id}
-              onChange={(e) =>
-                setTransferForm((prev) => ({ ...prev, product_id: e.target.value }))
-              }
-              className="rounded-2xl border border-[#ebe4f7] px-4 py-3 outline-none focus:border-[#9b6bff]"
-              required
-            >
-              <option value="">Select Product</option>
-              {products.map((product) => (
-                <option key={product.id} value={product.id}>
-                  {product.name} ({product.sku})
-                </option>
-              ))}
-            </select>
+        <PermissionGate permission="movements.create">
+          <form onSubmit={handleTransferSubmit} className="space-y-4">
+            <div className="grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-3">
+              <select
+                value={transferForm.product_id}
+                onChange={(e) =>
+                  setTransferForm((prev) => ({ ...prev, product_id: e.target.value }))
+                }
+                className="rounded-2xl border border-[#ebe4f7] px-4 py-3 outline-none focus:border-[#9b6bff]"
+                required
+              >
+                <option value="">Select Product</option>
+                {products.map((product) => (
+                  <option key={product.id} value={product.id}>
+                    {product.name} ({product.sku})
+                  </option>
+                ))}
+              </select>
 
-            <select
-              value={transferForm.from_warehouse_id}
-              onChange={(e) =>
-                setTransferForm((prev) => ({
-                  ...prev,
-                  from_warehouse_id: e.target.value,
-                }))
-              }
-              className="rounded-2xl border border-[#ebe4f7] px-4 py-3 outline-none focus:border-[#9b6bff]"
-              required
-            >
-              <option value="">From Warehouse</option>
-              {warehouses.map((warehouse) => (
-                <option key={warehouse.id} value={warehouse.id}>
-                  {warehouse.name} ({warehouse.code})
-                </option>
-              ))}
-            </select>
+              <select
+                value={transferForm.from_warehouse_id}
+                onChange={(e) =>
+                  setTransferForm((prev) => ({
+                    ...prev,
+                    from_warehouse_id: e.target.value,
+                  }))
+                }
+                className="rounded-2xl border border-[#ebe4f7] px-4 py-3 outline-none focus:border-[#9b6bff]"
+                required
+              >
+                <option value="">From Warehouse</option>
+                {warehouses.map((warehouse) => (
+                  <option key={warehouse.id} value={warehouse.id}>
+                    {warehouse.name} ({warehouse.code})
+                  </option>
+                ))}
+              </select>
 
-            <select
-              value={transferForm.to_warehouse_id}
-              onChange={(e) =>
-                setTransferForm((prev) => ({
-                  ...prev,
-                  to_warehouse_id: e.target.value,
-                }))
-              }
-              className="rounded-2xl border border-[#ebe4f7] px-4 py-3 outline-none focus:border-[#9b6bff]"
-              required
-            >
-              <option value="">To Warehouse</option>
-              {warehouses.map((warehouse) => (
-                <option key={warehouse.id} value={warehouse.id}>
-                  {warehouse.name} ({warehouse.code})
-                </option>
-              ))}
-            </select>
+              <select
+                value={transferForm.to_warehouse_id}
+                onChange={(e) =>
+                  setTransferForm((prev) => ({
+                    ...prev,
+                    to_warehouse_id: e.target.value,
+                  }))
+                }
+                className="rounded-2xl border border-[#ebe4f7] px-4 py-3 outline-none focus:border-[#9b6bff]"
+                required
+              >
+                <option value="">To Warehouse</option>
+                {warehouses.map((warehouse) => (
+                  <option key={warehouse.id} value={warehouse.id}>
+                    {warehouse.name} ({warehouse.code})
+                  </option>
+                ))}
+              </select>
 
-            <input
-              type="number"
-              min="1"
-              value={transferForm.quantity}
-              onChange={(e) =>
-                setTransferForm((prev) => ({ ...prev, quantity: e.target.value }))
-              }
-              placeholder="Transfer Quantity"
-              className="rounded-2xl border border-[#ebe4f7] px-4 py-3 outline-none focus:border-[#9b6bff]"
-              required
-            />
+              <input
+                type="number"
+                min="1"
+                value={transferForm.quantity}
+                onChange={(e) =>
+                  setTransferForm((prev) => ({ ...prev, quantity: e.target.value }))
+                }
+                placeholder="Transfer Quantity"
+                className="rounded-2xl border border-[#ebe4f7] px-4 py-3 outline-none focus:border-[#9b6bff]"
+                required
+              />
 
-            <input
-              type="date"
-              value={transferForm.transfer_date}
-              onChange={(e) =>
-                setTransferForm((prev) => ({ ...prev, transfer_date: e.target.value }))
-              }
-              className="rounded-2xl border border-[#ebe4f7] px-4 py-3 outline-none focus:border-[#9b6bff]"
-              required
-            />
+              <input
+                type="date"
+                value={transferForm.transfer_date}
+                onChange={(e) =>
+                  setTransferForm((prev) => ({ ...prev, transfer_date: e.target.value }))
+                }
+                className="rounded-2xl border border-[#ebe4f7] px-4 py-3 outline-none focus:border-[#9b6bff]"
+                required
+              />
 
-            <input
-              type="text"
-              value={transferForm.remarks}
-              onChange={(e) =>
-                setTransferForm((prev) => ({ ...prev, remarks: e.target.value }))
-              }
-              placeholder="Remarks / Reason"
-              className="rounded-2xl border border-[#ebe4f7] px-4 py-3 outline-none focus:border-[#9b6bff]"
-            />
-          </div>
-
-          <div className="grid grid-cols-1 gap-3 md:grid-cols-3">
-            <div className="rounded-2xl bg-[#fcfaff] p-4">
-              <p className="text-sm text-[#7c7494]">Available in source warehouse</p>
-              <p className="mt-1 text-2xl font-bold text-[#4d3188]">
-                {selectedFromWarehouseQty}
-              </p>
+              <input
+                type="text"
+                value={transferForm.remarks}
+                onChange={(e) =>
+                  setTransferForm((prev) => ({ ...prev, remarks: e.target.value }))
+                }
+                placeholder="Remarks / Reason"
+                className="rounded-2xl border border-[#ebe4f7] px-4 py-3 outline-none focus:border-[#9b6bff]"
+              />
             </div>
 
-            <div className="rounded-2xl bg-[#fcfaff] p-4">
-              <p className="text-sm text-[#7c7494]">Selected quantity</p>
-              <p className="mt-1 text-2xl font-bold text-[#4d3188]">
-                {transferForm.quantity || 0}
-              </p>
+            <div className="grid grid-cols-1 gap-3 md:grid-cols-3">
+              <div className="rounded-2xl bg-[#fcfaff] p-4">
+                <p className="text-sm text-[#7c7494]">Available in source warehouse</p>
+                <p className="mt-1 text-2xl font-bold text-[#4d3188]">
+                  {selectedFromWarehouseQty}
+                </p>
+              </div>
+
+              <div className="rounded-2xl bg-[#fcfaff] p-4">
+                <p className="text-sm text-[#7c7494]">Selected quantity</p>
+                <p className="mt-1 text-2xl font-bold text-[#4d3188]">
+                  {transferForm.quantity || 0}
+                </p>
+              </div>
+
+              <div className="rounded-2xl bg-[#fcfaff] p-4">
+                <p className="text-sm text-[#7c7494]">Balance after transfer</p>
+                <p className="mt-1 text-2xl font-bold text-[#4d3188]">
+                  {Math.max(
+                    0,
+                    selectedFromWarehouseQty - Number(transferForm.quantity || 0)
+                  )}
+                </p>
+              </div>
             </div>
 
-            <div className="rounded-2xl bg-[#fcfaff] p-4">
-              <p className="text-sm text-[#7c7494]">Balance after transfer</p>
-              <p className="mt-1 text-2xl font-bold text-[#4d3188]">
-                {Math.max(
-                  0,
-                  selectedFromWarehouseQty - Number(transferForm.quantity || 0)
-                )}
-              </p>
-            </div>
-          </div>
-
-          <AppButton type="submit" size="lg" disabled={submittingTransfer}>
-            {submittingTransfer ? 'Saving Transfer...' : 'Save Transfer'}
-          </AppButton>
-        </form>
+            <AppButton type="submit" size="lg" disabled={submittingTransfer}>
+              {submittingTransfer ? 'Saving Transfer...' : 'Save Transfer'}
+            </AppButton>
+          </form>
+        </PermissionGate>
       </SectionCard>
 
       <SectionCard

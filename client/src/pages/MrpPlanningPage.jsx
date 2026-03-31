@@ -3,6 +3,7 @@ import PageHeader from '../components/common/PageHeader';
 import SectionCard from '../components/common/SectionCard';
 import AppButton from '../components/common/AppButton';
 import EmptyState from '../components/common/EmptyState';
+import PermissionGate from '../components/auth/PermissionGate';
 import {
   getMrpMeta,
   getMrpPolicies,
@@ -304,11 +305,20 @@ export default function MrpPlanningPage() {
         ]}
       />
 
-      <SectionCard title="Replenishment Policy">
-        {loadingMeta ? (
-          <EmptyState message="Loading products, warehouses, and suppliers..." />
-        ) : (
-          <form onSubmit={handlePolicySubmit} className="space-y-4">
+      <SectionCard
+        title="Replenishment Policy"
+        subtitle="Only users with MRP run permission can create or update replenishment policies."
+      >
+        <PermissionGate
+          permission="mrp.run"
+          fallback={
+            <EmptyState message="You do not have permission to manage replenishment policies." />
+          }
+        >
+          {loadingMeta ? (
+            <EmptyState message="Loading products, warehouses, and suppliers..." />
+          ) : (
+            <form onSubmit={handlePolicySubmit} className="space-y-4">
             <div className="grid grid-cols-1 gap-4 md:grid-cols-3">
               <div>
                 <label className="mb-2 block text-sm font-medium text-[#6e6487]">
@@ -567,8 +577,9 @@ export default function MrpPlanningPage() {
                 {savingPolicy ? 'Saving...' : 'Save Policy'}
               </AppButton>
             </div>
-          </form>
-        )}
+            </form>
+          )}
+        </PermissionGate>
       </SectionCard>
 
       <SectionCard title="Policy Filters">
