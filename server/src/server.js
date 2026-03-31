@@ -41,24 +41,56 @@ dotenv.config();
 const app = express();
 const PORT = process.env.PORT || 5000;
 
-const allowedOrigins = [
-  'http://localhost:5173',
-  'https://erp-software-git-main-bacolodwork-2207s-projects.vercel.app',
+const envOrigins = [
   process.env.CLIENT_URL,
   process.env.CORS_ORIGIN,
-].filter(Boolean);
+  process.env.CORS_ORIGINS, // comma-separated list
+]
+  .filter(Boolean)
+  .flatMap((value) => value.split(','))
+  .map((value) => value.trim())
+  .filter(Boolean);
 
-app.use(
-  cors({
-    origin: (origin, callback) => {
-      if (!origin) return callback(null, true);
-      if (allowedOrigins.includes(origin)) return callback(null, true);
-      return callback(new Error(`CORS blocked for origin: ${origin}`));
-    },
-    credentials: true,
-  })
-);
+const exactAllowedOrigins = new Set([
+  'http://localhost:5173',
+  'http://127.0.0.1:5173',
+  'https://erp-software-phi.vercel.app',
+  ...envOrigins,
+]);
 
+const isAllowedOrigin = (origin) => {
+  if (!origin) return true;
+
+  if (exactAllowedOrigins.has(origin)) {
+    return true;
+  }
+
+  // Allow Vercel preview deployments for this account/project
+  if (
+    /^https:\/\/erp-software(?:-[a-z0-9-]+)?\.vercel\.app$/i.test(origin) ||
+    /^https:\/\/[a-z0-9-]+-bacolodwork-2207s-projects\.vercel\.app$/i.test(origin)
+  ) {
+    return true;
+  }
+
+  return false;
+};
+
+const corsOptions = {
+  origin(origin, callback) {
+    if (isAllowedOrigin(origin)) {
+      return callback(null, true);
+    }
+
+    return callback(new Error(`CORS blocked for origin: ${origin}`));
+  },
+  credentials: true,
+  methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
+  allowedHeaders: ['Content-Type', 'Authorization', 'x-company-id', 'x-branch-id', 'x-business-unit-id'],
+};
+
+app.use(cors(corsOptions));
+app.options('*', cors(corsOptions));
 app.use(express.json());
 
 app.get('/', (_req, res) => {

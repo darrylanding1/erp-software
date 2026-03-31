@@ -11,6 +11,7 @@ export default function LoginPage() {
     email: '',
     password: '',
   });
+
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
 
@@ -44,9 +45,11 @@ export default function LoginPage() {
             <p className="inline-flex rounded-full bg-white px-4 py-2 text-xs font-semibold uppercase tracking-[0.25em] text-[#6d3fd1] shadow-sm">
               Inventory Pro
             </p>
+
             <h1 className="mt-6 text-4xl font-bold leading-tight text-[#4d3188]">
               Secure access for your inventory and ERP workflows.
             </h1>
+
             <p className="mt-4 text-base leading-7 text-[#6e6487]">
               This build adds hashed passwords, JWT authentication, role-based access control,
               frontend route guards, and audit trail logging for sensitive actions.
@@ -57,17 +60,38 @@ export default function LoginPage() {
         <div className="p-6 sm:p-10">
           <div className="mx-auto w-full max-w-md">
             <h2 className="text-3xl font-bold text-[#4d3188]">Sign in</h2>
+
             <p className="mt-2 text-sm text-[#7c7494]">
               Use your system email and password.
             </p>
 
-            <form onSubmit={handleSubmit} className="mt-8 space-y-4">
+            <form
+              onSubmit={handleSubmit}
+              className="mt-8 space-y-4"
+              name="login_form"
+              autoComplete="on"
+            >
               <div>
-                <label className="mb-2 block text-sm font-medium text-[#5f547c]">Email</label>
+                <label
+                  htmlFor="login_email"
+                  className="mb-2 block text-sm font-medium text-[#5f547c]"
+                >
+                  Email
+                </label>
+
                 <input
+                  id="login_email"
+                  name="email"
                   type="email"
+                  autoComplete="email"
+                  inputMode="email"
                   value={form.email}
-                  onChange={(e) => setForm((prev) => ({ ...prev, email: e.target.value }))}
+                  onChange={(e) =>
+                    setForm((prev) => ({
+                      ...prev,
+                      email: e.target.value,
+                    }))
+                  }
                   className="w-full rounded-2xl border border-[#ebe4f7] px-4 py-3 outline-none focus:border-[#9b6bff]"
                   placeholder="you@example.com"
                   required
@@ -75,11 +99,25 @@ export default function LoginPage() {
               </div>
 
               <div>
-                <label className="mb-2 block text-sm font-medium text-[#5f547c]">Password</label>
+                <label
+                  htmlFor="login_password"
+                  className="mb-2 block text-sm font-medium text-[#5f547c]"
+                >
+                  Password
+                </label>
+
                 <input
+                  id="login_password"
+                  name="password"
                   type="password"
+                  autoComplete="current-password"
                   value={form.password}
-                  onChange={(e) => setForm((prev) => ({ ...prev, password: e.target.value }))}
+                  onChange={(e) =>
+                    setForm((prev) => ({
+                      ...prev,
+                      password: e.target.value,
+                    }))
+                  }
                   className="w-full rounded-2xl border border-[#ebe4f7] px-4 py-3 outline-none focus:border-[#9b6bff]"
                   placeholder="Enter your password"
                   required
@@ -87,7 +125,11 @@ export default function LoginPage() {
               </div>
 
               {error ? (
-                <div className="rounded-2xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-700">
+                <div
+                  className="rounded-2xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-700"
+                  role="alert"
+                  aria-live="polite"
+                >
                   {error}
                 </div>
               ) : null}
