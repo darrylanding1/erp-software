@@ -54,7 +54,7 @@ export default function MainLayout({ children }) {
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const { user, logout, hasAllPermissions, hasAnyPermission } = useAuth();
 
-  // prevent background scroll on mobile sidebar open
+  // prevent background scroll on mobile
   useEffect(() => {
     if (sidebarOpen) {
       document.body.style.overflow = 'hidden';
@@ -113,17 +113,17 @@ export default function MainLayout({ children }) {
   const sidebarContent = (mobile = false) => (
     <>
       {/* HEADER */}
-      <div className="border-b border-[#ebe4f7] px-6 py-5">
+      <div className="border-b border-[#f1ecf8] px-5 py-4">
         <div className="flex items-start justify-between">
           <div>
-            <h1 className="text-xl font-bold text-[#4d3188]">Inventory Pro</h1>
-            <p className="text-xs text-[#7c7494]">Management Panel</p>
+            <h1 className="text-lg font-bold text-[#4d3188]">Inventory Pro</h1>
+            <p className="text-xs text-[#8a82a3]">Management Panel</p>
           </div>
 
           {mobile && (
             <button
               onClick={() => setSidebarOpen(false)}
-              className="p-2 rounded-xl border border-[#ebe4f7]"
+              className="p-2 rounded-xl border border-[#f1ecf8]"
             >
               <X size={18} />
             </button>
@@ -131,23 +131,27 @@ export default function MainLayout({ children }) {
         </div>
       </div>
 
-      {/* ✅ SMALLER ACTIVE SCOPE */}
-      <div className="border-b border-[#ebe4f7] px-3 py-3">
-        <p className="text-[10px] uppercase tracking-[0.16em] text-[#8f85aa]">User</p>
+      {/* ✅ SMALL CLEAN ACTIVE SCOPE */}
+      <div className="border-b border-[#f1ecf8] px-3 py-2">
+        <p className="text-[10px] uppercase tracking-wide text-[#a59bbf]">
+          User
+        </p>
 
         <p className="mt-1 text-sm font-semibold text-[#4d3188] truncate">
           {user?.full_name}
         </p>
 
-        <p className="text-[11px] text-[#7c7494] truncate">
+        <p className="text-[11px] text-[#8a82a3] truncate">
           {user?.email}
         </p>
 
-        <span className="mt-2 inline-flex rounded-full bg-[#efe4ff] px-2 py-0.5 text-[10px] font-semibold text-[#6d3fd1]">
-          {user?.role}
-        </span>
+        <div className="mt-1 flex items-center justify-between">
+          <span className="rounded-full bg-[#f4efff] px-2 py-[2px] text-[10px] font-semibold text-[#6d3fd1]">
+            {user?.role}
+          </span>
+        </div>
 
-        <div className="mt-2 scale-90 origin-top-left">
+        <div className="mt-1 scale-90 origin-top-left">
           <OrganizationScopeSwitcher />
         </div>
       </div>
@@ -158,10 +162,10 @@ export default function MainLayout({ children }) {
       </nav>
 
       {/* FOOTER */}
-      <div className="border-t border-[#ebe4f7] p-4">
+      <div className="border-t border-[#f1ecf8] p-4">
         <button
           onClick={handleLogout}
-          className="flex w-full items-center justify-center gap-2 rounded-2xl border border-[#ebe4f7] px-4 py-3 font-semibold text-[#4d3188] hover:bg-[#f7f2ff]"
+          className="flex w-full items-center justify-center gap-2 rounded-2xl border border-[#f1ecf8] px-4 py-3 font-semibold text-[#4d3188] hover:bg-[#f7f2ff]"
         >
           <LogOut size={18} />
           Logout
@@ -173,7 +177,7 @@ export default function MainLayout({ children }) {
   return (
     <div className="min-h-screen bg-[#f8f5ff]">
       {/* DESKTOP SIDEBAR */}
-      <aside className="fixed inset-y-0 left-0 z-20 hidden w-72 bg-white border-r md:flex flex-col">
+      <aside className="fixed inset-y-0 left-0 z-20 hidden w-72 bg-white border-r border-[#f1ecf8] md:flex flex-col">
         {sidebarContent()}
       </aside>
 
@@ -181,7 +185,7 @@ export default function MainLayout({ children }) {
       {sidebarOpen && (
         <div className="fixed inset-0 z-40 md:hidden">
           <div
-            className="absolute inset-0 bg-black/30"
+            className="absolute inset-0 bg-black/20"
             onClick={() => setSidebarOpen(false)}
           />
 
@@ -193,13 +197,13 @@ export default function MainLayout({ children }) {
 
       {/* CONTENT */}
       <div className="md:pl-72">
-        <header className="sticky top-0 z-30 bg-white border-b md:hidden">
+        <header className="sticky top-0 z-30 bg-white border-b border-[#f1ecf8] md:hidden">
           <div className="flex items-center justify-between px-4 py-3">
             <h1 className="font-bold text-[#4d3188]">Inventory</h1>
 
             <button
               onClick={() => setSidebarOpen(true)}
-              className="p-2 border rounded-xl"
+              className="p-2 border border-[#f1ecf8] rounded-xl"
             >
               <Menu size={20} />
             </button>
