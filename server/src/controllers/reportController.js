@@ -2,8 +2,16 @@ import db from '../config/db.js';
 
 export const getLowStockReport = async (req, res) => {
   try {
+    console.log('LOW_STOCK_REPORT_VERSION=2026-03-31-FIX-1');
+
     const threshold = Number(req.query.threshold || 10);
     const { company_id, branch_id, business_unit_id } = req.dataScope || {};
+
+    if (!company_id || !branch_id || !business_unit_id) {
+      return res.status(400).json({
+        message: 'Missing organization scope',
+      });
+    }
 
     const [rows] = await db.query(
       `
@@ -25,13 +33,15 @@ export const getLowStockReport = async (req, res) => {
       FROM products p
       LEFT JOIN categories c
         ON p.category_id = c.id
+       AND c.company_id = ?
+       AND c.branch_id = ?
+       AND c.business_unit_id = ?
       LEFT JOIN inventory_stocks s
         ON s.product_id = p.id
        AND s.company_id = ?
        AND s.branch_id = ?
        AND s.business_unit_id = ?
-      WHERE 1 = 1
-        AND p.company_id = ?
+      WHERE p.company_id = ?
         AND p.branch_id = ?
         AND p.business_unit_id = ?
       GROUP BY
@@ -47,6 +57,9 @@ export const getLowStockReport = async (req, res) => {
       `,
       [
         threshold,
+        company_id,
+        branch_id,
+        business_unit_id,
         company_id,
         branch_id,
         business_unit_id,
