@@ -23,7 +23,6 @@ import AccountingPeriodsPage from './pages/AccountingPeriodsPage';
 import MrpPlanningPage from './pages/MrpPlanningPage';
 import PurchaseRequisitionsPage from './pages/PurchaseRequisitionsPage';
 import GoodsReceiptsPage from './pages/GoodsReceiptsPage';
-import AccessControlPage from './pages/AccessControlPage';
 import useFormFieldAccessibility from './hooks/useFormFieldAccessibility';
 import { appRoutes } from './constants/rbacRoutes';
 
@@ -50,7 +49,6 @@ const routeElementMap = {
   '/audit-trail': <AuditTrailPage />,
   '/mrp': <MrpPlanningPage />,
   '/users': <UsersPage />,
-  '/access-control': <AccessControlPage />,
 };
 
 function App() {
