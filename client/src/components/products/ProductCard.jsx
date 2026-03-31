@@ -8,11 +8,9 @@ export default function ProductCard({ product, onEdit, onDelete }) {
   return (
     <div className="rounded-2xl border border-[#ebe4f7] bg-white p-4 shadow-sm sm:rounded-3xl">
       <div className="flex flex-col gap-4 sm:flex-row">
-        <img
-          src={product.image_url || 'https://via.placeholder.com/80'}
-          alt={product.name}
-          className="h-24 w-full rounded-2xl object-cover sm:h-24 sm:w-24"
-        />
+        <div className="flex h-24 w-full items-center justify-center rounded-2xl bg-[#f7f2ff] text-3xl font-bold text-[#7344d0] sm:h-24 sm:w-24">
+          {(product.name || '?').trim().charAt(0).toUpperCase() || '?'}
+        </div>
 
         <div className="flex-1">
           <div className="flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between">
@@ -85,4 +83,4 @@ export default function ProductCard({ product, onEdit, onDelete }) {
       </div>
     </div>
   );
-}
+} 
