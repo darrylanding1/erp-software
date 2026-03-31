@@ -1,22 +1,9 @@
 import db from '../config/db.js';
-import { buildScopeWhereClause } from '../middleware/dataScopeMiddleware.js';
 
 export const getLowStockReport = async (req, res) => {
   try {
     const threshold = Number(req.query.threshold || 10);
-    const scope = req.dataScope || {};
-
-    const productScope = buildScopeWhereClause(scope, {
-      company: 'p.company_id',
-      branch: 'p.branch_id',
-      businessUnit: 'p.business_unit_id',
-    });
-
-    const stockScope = buildScopeWhereClause(scope, {
-      company: 's.company_id',
-      branch: 's.branch_id',
-      businessUnit: 's.business_unit_id',
-    });
+    const { company_id, branch_id, business_unit_id } = req.dataScope || {};
 
     const [rows] = await db.query(
       `
@@ -40,8 +27,13 @@ export const getLowStockReport = async (req, res) => {
         ON p.category_id = c.id
       LEFT JOIN inventory_stocks s
         ON s.product_id = p.id
-       ${stockScope.sql}
-      WHERE 1 = 1 ${productScope.sql}
+       AND s.company_id = ?
+       AND s.branch_id = ?
+       AND s.business_unit_id = ?
+      WHERE 1 = 1
+        AND p.company_id = ?
+        AND p.branch_id = ?
+        AND p.business_unit_id = ?
       GROUP BY
         p.id,
         p.name,
@@ -53,7 +45,16 @@ export const getLowStockReport = async (req, res) => {
       HAVING COALESCE(SUM(s.quantity), 0) <= ?
       ORDER BY quantity ASC, p.name ASC
       `,
-      [threshold, ...stockScope.values, ...productScope.values, threshold]
+      [
+        threshold,
+        company_id,
+        branch_id,
+        business_unit_id,
+        company_id,
+        branch_id,
+        business_unit_id,
+        threshold,
+      ]
     );
 
     res.json(rows);
