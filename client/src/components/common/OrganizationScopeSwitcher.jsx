@@ -31,10 +31,7 @@ export default function OrganizationScopeSwitcher() {
   );
 
   const availableBusinessUnits = useMemo(() => {
-    if (selectedBranch) {
-      return selectedBranch.business_units || [];
-    }
-
+    if (selectedBranch) return selectedBranch.business_units || [];
     return selectedCompany?.company_level_business_units || [];
   }, [selectedCompany, selectedBranch]);
 
@@ -59,23 +56,23 @@ export default function OrganizationScopeSwitcher() {
     window.location.reload();
   };
 
-  if (!companies.length) {
-    return null;
-  }
+  if (!companies.length) return null;
 
   return (
-    <div className="rounded-xl bg-[#faf7ff] p-2.5">
-      <p className="text-[10px] uppercase tracking-[0.16em] text-[#9c92b7]">
-        Active Scope
+    <div className="rounded-lg bg-[#faf7ff] p-2">
+      {/* TITLE */}
+      <p className="text-[9px] uppercase tracking-wide text-[#9c92b7]">
+        Scope
       </p>
 
-      <div className="mt-2 grid grid-cols-1 gap-2">
+      {/* FIELDS */}
+      <div className="mt-1.5 flex flex-col gap-1.5">
         <select
           value={companyId}
           onChange={(e) => handleCompanyChange(e.target.value)}
-          className="min-h-10 rounded-xl border border-[#ece5f8] bg-white px-3 py-2 text-xs text-[#3f345e] outline-none focus:border-[#9b6bff]"
+          className="h-8 rounded-lg border border-[#ece5f8] bg-white px-2 text-[11px] text-[#3f345e] outline-none focus:border-[#9b6bff]"
         >
-          <option value="">Select company</option>
+          <option value="">Company</option>
           {companies.map((company) => (
             <option key={company.id} value={company.id}>
               {company.name}
@@ -86,10 +83,10 @@ export default function OrganizationScopeSwitcher() {
         <select
           value={branchId}
           onChange={(e) => handleBranchChange(e.target.value)}
-          className="min-h-10 rounded-xl border border-[#ece5f8] bg-white px-3 py-2 text-xs text-[#3f345e] outline-none focus:border-[#9b6bff] disabled:bg-[#f8f6fc] disabled:text-[#9e95b7]"
           disabled={!companyId}
+          className="h-8 rounded-lg border border-[#ece5f8] bg-white px-2 text-[11px] text-[#3f345e] outline-none focus:border-[#9b6bff] disabled:bg-[#f8f6fc] disabled:text-[#9e95b7]"
         >
-          <option value="">All branches</option>
+          <option value="">Branch</option>
           {availableBranches.map((branch) => (
             <option key={branch.id} value={branch.id}>
               {branch.name}
@@ -100,10 +97,10 @@ export default function OrganizationScopeSwitcher() {
         <select
           value={businessUnitId}
           onChange={(e) => setBusinessUnitId(e.target.value)}
-          className="min-h-10 rounded-xl border border-[#ece5f8] bg-white px-3 py-2 text-xs text-[#3f345e] outline-none focus:border-[#9b6bff] disabled:bg-[#f8f6fc] disabled:text-[#9e95b7]"
           disabled={!companyId}
+          className="h-8 rounded-lg border border-[#ece5f8] bg-white px-2 text-[11px] text-[#3f345e] outline-none focus:border-[#9b6bff] disabled:bg-[#f8f6fc] disabled:text-[#9e95b7]"
         >
-          <option value="">All business units</option>
+          <option value="">Unit</option>
           {availableBusinessUnits.map((unit) => (
             <option key={unit.id} value={unit.id}>
               {unit.name}
@@ -115,9 +112,9 @@ export default function OrganizationScopeSwitcher() {
           type="button"
           onClick={handleApply}
           disabled={!companyId}
-          className="min-h-10 rounded-xl bg-[#6d3fd1] px-3 py-2 text-xs font-semibold text-white transition hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-50"
+          className="h-8 rounded-lg bg-[#6d3fd1] text-[11px] font-semibold text-white transition hover:opacity-90 disabled:opacity-50"
         >
-          Apply Scope
+          Apply
         </button>
       </div>
     </div>
