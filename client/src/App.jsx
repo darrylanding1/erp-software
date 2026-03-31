@@ -23,6 +23,7 @@ import AccountingPeriodsPage from './pages/AccountingPeriodsPage';
 import MrpPlanningPage from './pages/MrpPlanningPage';
 import PurchaseRequisitionsPage from './pages/PurchaseRequisitionsPage';
 import GoodsReceiptsPage from './pages/GoodsReceiptsPage';
+import AccessControlPage from './pages/AccessControlPage';
 import useFormFieldAccessibility from './hooks/useFormFieldAccessibility';
 import { appRoutes } from './constants/rbacRoutes';
 
@@ -49,6 +50,7 @@ const routeElementMap = {
   '/audit-trail': <AuditTrailPage />,
   '/mrp': <MrpPlanningPage />,
   '/users': <UsersPage />,
+  '/access-control': <AccessControlPage />,
 };
 
 function App() {
@@ -62,7 +64,12 @@ function App() {
       {appRoutes.map((route) => (
         <Route
           key={route.path}
-          element={<ProtectedRoute allPermissions={route.allPermissions} anyPermissions={route.anyPermissions} />}
+          element={
+            <ProtectedRoute
+              allPermissions={route.allPermissions}
+              anyPermissions={route.anyPermissions}
+            />
+          }
         >
           <Route path={route.path} element={withLayout(routeElementMap[route.path])} />
         </Route>
