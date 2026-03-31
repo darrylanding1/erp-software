@@ -12,9 +12,9 @@ export const getDashboardData = async (req, res) => {
     });
 
     const categoryScope = buildScopeWhereClause(scope, {
-      company: 'c.company_id',
-      branch: 'c.branch_id',
-      businessUnit: 'c.business_unit_id',
+      company: 'company_id',
+      branch: 'branch_id',
+      businessUnit: 'business_unit_id',
     });
 
     const stockScope = buildScopeWhereClause(scope, {
@@ -81,7 +81,7 @@ export const getDashboardData = async (req, res) => {
     const [[categoriesCount]] = await db.query(
       `
       SELECT COUNT(*) AS totalCategories
-      FROM categories c
+      FROM categories
       WHERE 1 = 1 ${categoryScope.sql}
       `,
       categoryScope.values
@@ -94,7 +94,7 @@ export const getDashboardData = async (req, res) => {
         'SELECT COUNT(*) AS totalUsers FROM users'
       );
       totalUsers = usersCount.totalUsers;
-    } catch (error) {
+    } catch (_error) {
       totalUsers = 0;
     }
 
@@ -159,9 +159,6 @@ export const getDashboardData = async (req, res) => {
     });
   } catch (error) {
     console.error('Get dashboard data error:', error);
-    res.status(500).json({
-      message: 'Failed to fetch dashboard data',
-      error: error.message,
-    });
+    res.status(500).json({ message: 'Failed to fetch dashboard data' });
   }
 };

@@ -1,16 +1,10 @@
 import db from '../config/db.js';
-import fs from 'fs';
-import path from 'path';
-import { fileURLToPath } from 'url';
 import { createAuditLog, getRequestIp } from '../utils/auditTrail.js';
 import {
   getProductStockSummaryQuery,
   initializeProductInventoryRows,
   syncProductInventorySummary,
 } from '../utils/inventoryStock.js';
-
-const __filename = fileURLToPath(import.meta.url);
-const __dirname = path.dirname(__filename);
 
 const stockStatusSql = `
   CASE
@@ -19,26 +13,6 @@ const stockStatusSql = `
     ELSE 'In Stock'
   END
 `;
-
-const getImageUrl = (req, filename) => {
-  const baseUrl = `${req.protocol}://${req.get('host')}`;
-  return `${baseUrl}/uploads/${filename}`;
-};
-
-const deleteImageFile = (imageUrl) => {
-  try {
-    if (!imageUrl) return;
-    const filename = imageUrl.split('/uploads/')[1];
-    if (!filename) return;
-
-    const filePath = path.join(__dirname, '..', 'uploads', filename);
-    if (fs.existsSync(filePath)) {
-      fs.unlinkSync(filePath);
-    }
-  } catch (error) {
-    console.error('Delete image file error:', error);
-  }
-};
 
 const toNumber = (value, defaultValue = 0) => {
   const parsed = Number(value);
@@ -96,7 +70,6 @@ const getProductById = async (id) => {
       p.country_of_origin,
       p.hs_code,
       p.notes,
-      p.image_url,
       p.created_at,
       p.updated_at,
       p.inventory_tracking_type,
@@ -199,9 +172,7 @@ const mapRequestToProductPayload = (req) => {
 
   const itemType = cleanText(body.item_type) || 'Inventory';
   const trackInventory =
-    itemType === 'Inventory'
-      ? toBoolean(body.track_inventory, true)
-      : false;
+    itemType === 'Inventory' ? toBoolean(body.track_inventory, true) : false;
 
   return {
     name: cleanText(body.name),
@@ -313,7 +284,6 @@ export const getProducts = async (req, res) => {
         p.country_of_origin,
         p.hs_code,
         p.notes,
-        p.image_url,
         p.created_at,
         p.updated_at,
         p.inventory_tracking_type,
@@ -405,8 +375,6 @@ export const createProduct = async (req, res) => {
       return res.status(400).json({ message: errors[0] });
     }
 
-    const image_url = req.file ? getImageUrl(req, req.file.filename) : null;
-
     const [result] = await connection.query(
       `
       INSERT INTO products
@@ -447,7 +415,7 @@ export const createProduct = async (req, res) => {
         is_serial_tracked
       )
       VALUES
-      (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, 'Out of Stock', ?, ?, ?, ?, ?, ?)
+      (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, 0, 'Out of Stock', ?, ?, ?, ?, ?, ?)
       `,
       [
         payload.name,
@@ -475,7 +443,6 @@ export const createProduct = async (req, res) => {
         payload.country_of_origin,
         payload.hs_code,
         payload.notes,
-        image_url,
         payload.inventory_tracking_type,
         payload.is_bin_managed ? 1 : 0,
         payload.is_expiry_tracked ? 1 : 0,
@@ -544,15 +511,6 @@ export const updateProduct = async (req, res) => {
       return res.status(400).json({ message: errors[0] });
     }
 
-    let image_url = req.body.existing_image_url || oldProduct.image_url;
-
-    if (req.file) {
-      image_url = getImageUrl(req, req.file.filename);
-      if (oldProduct.image_url) {
-        deleteImageFile(oldProduct.image_url);
-      }
-    }
-
     await db.query(
       `
       UPDATE products
@@ -582,7 +540,7 @@ export const updateProduct = async (req, res) => {
         country_of_origin = ?,
         hs_code = ?,
         notes = ?,
-        image_url = ?,
+        image_url = NULL,
         inventory_tracking_type = ?,
         is_bin_managed = ?,
         is_expiry_tracked = ?,
@@ -617,7 +575,6 @@ export const updateProduct = async (req, res) => {
         payload.country_of_origin,
         payload.hs_code,
         payload.notes,
-        image_url,
         payload.inventory_tracking_type,
         payload.is_bin_managed ? 1 : 0,
         payload.is_expiry_tracked ? 1 : 0,
@@ -681,10 +638,6 @@ export const deleteProduct = async (req, res) => {
       return res.status(400).json({
         message: 'Cannot delete a product with remaining stock',
       });
-    }
-
-    if (product.image_url) {
-      deleteImageFile(product.image_url);
     }
 
     await db.query('DELETE FROM inventory_stocks WHERE product_id = ?', [id]);

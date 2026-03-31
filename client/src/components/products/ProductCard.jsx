@@ -83,4 +83,4 @@ export default function ProductCard({ product, onEdit, onDelete }) {
       </div>
     </div>
   );
-} 
+}

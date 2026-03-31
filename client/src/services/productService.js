@@ -10,21 +10,13 @@ export const getProducts = async (params = {}) => {
   return response.data;
 };
 
-export const createProduct = async (formData) => {
-  const response = await api.post('/api/products', formData, {
-    headers: {
-      'Content-Type': 'multipart/form-data',
-    },
-  });
+export const createProduct = async (payload) => {
+  const response = await api.post('/api/products', payload);
   return response.data;
 };
 
-export const updateProduct = async (id, formData) => {
-  const response = await api.put(`/api/products/${id}`, formData, {
-    headers: {
-      'Content-Type': 'multipart/form-data',
-    },
-  });
+export const updateProduct = async (id, payload) => {
+  const response = await api.put(`/api/products/${id}`, payload);
   return response.data;
 };
 

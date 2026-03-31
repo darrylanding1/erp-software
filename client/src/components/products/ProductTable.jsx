@@ -34,11 +34,9 @@ export default function ProductTable({ products, onEdit, onDelete }) {
             <tr key={product.id} className="border-t border-[#ebe4f7] hover:bg-[#faf7ff]">
               <td className="px-4 py-4">
                 <div className="flex items-center gap-3">
-                  <img
-                    src={product.image_url || 'https://via.placeholder.com/80'}
-                    alt={product.name}
-                    className="h-12 w-12 rounded-xl object-cover"
-                  />
+                  <div className="flex h-12 w-12 items-center justify-center rounded-xl bg-[#f7f2ff] text-lg font-bold text-[#7344d0]">
+                    {(product.name || '?').trim().charAt(0).toUpperCase() || '?'}
+                  </div>
                   <div>
                     <p className="font-semibold text-[#2b2340]">{product.name}</p>
                     <p className="text-xs text-[#7c7494]">SKU: {product.sku}</p>

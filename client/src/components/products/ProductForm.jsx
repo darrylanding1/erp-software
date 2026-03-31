@@ -34,7 +34,6 @@ const getInitialFormData = () => ({
   picking_strategy: 'FIFO',
   is_lot_tracked: false,
   is_serial_tracked: false,
-  image: null,
 });
 
 export default function ProductForm({
@@ -50,7 +49,6 @@ export default function ProductForm({
   },
 }) {
   const [formData, setFormData] = useState(getInitialFormData());
-  const [preview, setPreview] = useState('');
   const [loading, setLoading] = useState(false);
 
   useEffect(() => {
@@ -87,12 +85,9 @@ export default function ProductForm({
         picking_strategy: editingProduct.picking_strategy || 'FIFO',
         is_lot_tracked: Number(editingProduct.is_lot_tracked) === 1,
         is_serial_tracked: Number(editingProduct.is_serial_tracked) === 1,
-        image: null,
       });
-      setPreview(editingProduct.image_url || '');
     } else {
       setFormData(getInitialFormData());
-      setPreview('');
     }
   }, [editingProduct]);
 
@@ -115,20 +110,7 @@ export default function ProductForm({
   }, [isInventoryItem]);
 
   const handleChange = (e) => {
-    const { name, value, type, checked, files } = e.target;
-
-    if (type === 'file') {
-      const file = files?.[0] || null;
-      setFormData((prev) => ({
-        ...prev,
-        image: file,
-      }));
-
-      if (file) {
-        setPreview(URL.createObjectURL(file));
-      }
-      return;
-    }
+    const { name, value, type, checked } = e.target;
 
     setFormData((prev) => {
       const nextValue = type === 'checkbox' ? checked : value;
@@ -156,7 +138,6 @@ export default function ProductForm({
 
   const resetForm = () => {
     setFormData(getInitialFormData());
-    setPreview('');
   };
 
   const handleCancel = () => {
@@ -169,24 +150,9 @@ export default function ProductForm({
     setLoading(true);
 
     try {
-      const data = new FormData();
-
-      Object.entries(formData).forEach(([key, value]) => {
-        if (key === 'image') return;
-        data.append(key, value);
-      });
-
-      if (editingProduct?.image_url) {
-        data.append('existing_image_url', editingProduct.image_url);
-      }
-
-      if (formData.image) {
-        data.append('image', formData.image);
-      }
-
       const savedProduct = editingProduct
-        ? await updateProduct(editingProduct.id, data)
-        : await createProduct(data);
+        ? await updateProduct(editingProduct.id, formData)
+        : await createProduct(formData);
 
       onSaveProduct(savedProduct);
       resetForm();
@@ -322,26 +288,7 @@ export default function ProductForm({
               className={`${inputClass} md:col-span-2 2xl:col-span-4`}
               rows={3}
             />
-
-            <input
-              type="file"
-              name="image"
-              accept="image/*"
-              onChange={handleChange}
-              className="rounded-2xl border border-[#ebe4f7] px-4 py-3 text-sm outline-none file:mr-4 file:rounded-xl file:border-0 file:bg-[#f7f2ff] file:px-4 file:py-2 file:text-[#7344d0] md:col-span-2 2xl:col-span-4"
-            />
           </div>
-
-          {preview && (
-            <div className="mt-4">
-              <p className="mb-2 text-sm font-medium text-[#7c7494]">Image Preview</p>
-              <img
-                src={preview}
-                alt="Preview"
-                className="h-24 w-24 rounded-2xl border border-[#ebe4f7] object-cover sm:h-32 sm:w-32"
-              />
-            </div>
-          )}
         </div>
 
         <div>
