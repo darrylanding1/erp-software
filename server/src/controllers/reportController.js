@@ -2,7 +2,7 @@ import db from '../config/db.js';
 
 export const getLowStockReport = async (req, res) => {
   try {
-    console.log('LOW_STOCK_REPORT_VERSION=2026-03-31-FIX-1');
+    console.log('LOW_STOCK_REPORT_VERSION=2026-03-31-FIX-2');
 
     const threshold = Number(req.query.threshold || 10);
     const { company_id, branch_id, business_unit_id } = req.dataScope || {};
@@ -70,7 +70,24 @@ export const getLowStockReport = async (req, res) => {
       ]
     );
 
-    res.json(rows);
+    const summary = rows.reduce(
+      (acc, item) => {
+        acc.totalItems += 1;
+        acc.totalUnits += Number(item.quantity || 0);
+        acc.totalStockValue += Number(item.stock_value || 0);
+        return acc;
+      },
+      {
+        totalItems: 0,
+        totalUnits: 0,
+        totalStockValue: 0,
+      }
+    );
+
+    res.json({
+      summary,
+      items: rows,
+    });
   } catch (error) {
     console.error('Get low stock report error:', error);
     res.status(500).json({
