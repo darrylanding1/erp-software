@@ -1,4 +1,5 @@
 import { withTransaction } from '../utils/dbTransaction.js';
+import { requireDataScope } from '../middleware/dataScopeMiddleware.js';
 import {
   getStockCountMetaService,
   getStockCountsService,
@@ -10,9 +11,9 @@ import {
   cancelStockCountService,
 } from '../services/stockCountService.js';
 
-export const getStockCountMeta = async (_req, res) => {
+export const getStockCountMeta = async (req, res) => {
   try {
-    const data = await getStockCountMetaService();
+    const data = await getStockCountMetaService(requireDataScope(req));
     res.json(data);
   } catch (error) {
     console.error('Get stock count meta error:', error);
@@ -22,7 +23,7 @@ export const getStockCountMeta = async (_req, res) => {
 
 export const getStockCounts = async (req, res) => {
   try {
-    const rows = await getStockCountsService(req.query);
+    const rows = await getStockCountsService(req.query, requireDataScope(req));
     res.json(rows);
   } catch (error) {
     console.error('Get stock counts error:', error);
@@ -32,7 +33,7 @@ export const getStockCounts = async (req, res) => {
 
 export const getStockCountById = async (req, res) => {
   try {
-    const row = await getStockCountByIdService(Number(req.params.id));
+    const row = await getStockCountByIdService(Number(req.params.id), requireDataScope(req));
 
     if (!row) {
       return res.status(404).json({ message: 'Stock count not found' });
@@ -48,7 +49,7 @@ export const getStockCountById = async (req, res) => {
 export const createStockCount = async (req, res) => {
   try {
     const result = await withTransaction(async (connection) => {
-      return createStockCountService(connection, req.body, req.user?.id);
+      return createStockCountService(connection, req.body, req.user?.id, requireDataScope(req));
     });
 
     res.status(201).json(result);
@@ -61,7 +62,7 @@ export const createStockCount = async (req, res) => {
 export const submitStockCount = async (req, res) => {
   try {
     const result = await withTransaction(async (connection) => {
-      return submitStockCountService(connection, Number(req.params.id));
+      return submitStockCountService(connection, Number(req.params.id), requireDataScope(req));
     });
 
     res.json(result);
@@ -74,7 +75,7 @@ export const submitStockCount = async (req, res) => {
 export const approveStockCount = async (req, res) => {
   try {
     const result = await withTransaction(async (connection) => {
-      return approveStockCountService(connection, Number(req.params.id), req.user?.id);
+      return approveStockCountService(connection, Number(req.params.id), req.user?.id, requireDataScope(req));
     });
 
     res.json(result);
@@ -87,7 +88,7 @@ export const approveStockCount = async (req, res) => {
 export const postStockCount = async (req, res) => {
   try {
     const result = await withTransaction(async (connection) => {
-      return postStockCountService(connection, Number(req.params.id), req.user?.id);
+      return postStockCountService(connection, Number(req.params.id), req.user?.id, requireDataScope(req));
     });
 
     res.json(result);
@@ -104,7 +105,8 @@ export const cancelStockCount = async (req, res) => {
         connection,
         Number(req.params.id),
         req.user?.id,
-        req.body?.cancellation_reason || null
+        req.body?.cancellation_reason || null,
+        requireDataScope(req)
       );
     });
 

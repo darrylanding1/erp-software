@@ -1,4 +1,5 @@
 import { withTransaction } from '../utils/dbTransaction.js';
+import { requireDataScope } from '../middleware/dataScopeMiddleware.js';
 import {
   getReservationMetaService,
   getReservationsService,
@@ -7,9 +8,9 @@ import {
   issueReservationService,
 } from '../services/reservationService.js';
 
-export const getReservationMeta = async (_req, res) => {
+export const getReservationMeta = async (req, res) => {
   try {
-    const data = await getReservationMetaService();
+    const data = await getReservationMetaService(requireDataScope(req));
     res.json(data);
   } catch (error) {
     console.error('Get reservation meta error:', error);
@@ -19,7 +20,7 @@ export const getReservationMeta = async (_req, res) => {
 
 export const getReservations = async (req, res) => {
   try {
-    const rows = await getReservationsService(req.query);
+    const rows = await getReservationsService(req.query, requireDataScope(req));
     res.json(rows);
   } catch (error) {
     console.error('Get reservations error:', error);
@@ -30,7 +31,7 @@ export const getReservations = async (req, res) => {
 export const createReservation = async (req, res) => {
   try {
     const result = await withTransaction(async (connection) => {
-      return createReservationService(connection, req.body, req.user?.id);
+      return createReservationService(connection, req.body, req.user?.id, requireDataScope(req));
     });
 
     res.status(201).json(result);
@@ -43,7 +44,7 @@ export const createReservation = async (req, res) => {
 export const releaseReservation = async (req, res) => {
   try {
     const result = await withTransaction(async (connection) => {
-      return releaseReservationService(connection, Number(req.params.id));
+      return releaseReservationService(connection, Number(req.params.id), requireDataScope(req));
     });
 
     res.json(result);
@@ -60,7 +61,8 @@ export const issueReservation = async (req, res) => {
         connection,
         Number(req.params.id),
         req.body?.issue_quantity,
-        req.user?.id
+        req.user?.id,
+        requireDataScope(req)
       );
     });
 

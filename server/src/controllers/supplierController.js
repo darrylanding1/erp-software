@@ -2,6 +2,7 @@ import db from '../config/db.js';
 import {
   applyDataScopeFilter,
   assertScopeMatch,
+  requireDataScope,
 } from '../middleware/dataScopeMiddleware.js';
 
 const mapScopeInsert = (scope) => ({
@@ -12,6 +13,7 @@ const mapScopeInsert = (scope) => ({
 
 export const getSuppliers = async (req, res) => {
   try {
+    const scope = requireDataScope(req);
     const { search = '', status = '' } = req.query;
 
     let query = applyDataScopeFilter({
@@ -20,7 +22,7 @@ export const getSuppliers = async (req, res) => {
         FROM suppliers
         WHERE 1 = 1
       `,
-      scope: req.dataScope,
+      scope,
     });
 
     if (search) {
@@ -45,6 +47,7 @@ export const getSuppliers = async (req, res) => {
 
 export const getSupplierById = async (req, res) => {
   try {
+    const scope = requireDataScope(req);
     const { id } = req.params;
 
     const [rows] = await db.query('SELECT * FROM suppliers WHERE id = ?', [id]);
@@ -53,7 +56,7 @@ export const getSupplierById = async (req, res) => {
       return res.status(404).json({ message: 'Supplier not found' });
     }
 
-    assertScopeMatch(rows[0], req.dataScope);
+    assertScopeMatch(rows[0], scope);
 
     res.json(rows[0]);
   } catch (error) {
@@ -70,7 +73,7 @@ export const getSupplierById = async (req, res) => {
 export const createSupplier = async (req, res) => {
   try {
     const { name, contact_person, email, phone, address, status } = req.body;
-    const scope = mapScopeInsert(req.dataScope);
+    const scope = mapScopeInsert(requireDataScope(req));
 
     if (!name?.trim()) {
       return res.status(400).json({ message: 'Supplier name is required' });
@@ -115,6 +118,7 @@ export const createSupplier = async (req, res) => {
 
 export const updateSupplier = async (req, res) => {
   try {
+    const scope = requireDataScope(req);
     const { id } = req.params;
     const { name, contact_person, email, phone, address, status } = req.body;
 
@@ -128,7 +132,7 @@ export const updateSupplier = async (req, res) => {
       return res.status(404).json({ message: 'Supplier not found' });
     }
 
-    assertScopeMatch(existingRows[0], req.dataScope);
+    assertScopeMatch(existingRows[0], scope);
 
     await db.query(
       `
@@ -169,6 +173,7 @@ export const updateSupplier = async (req, res) => {
 
 export const deleteSupplier = async (req, res) => {
   try {
+    const scope = requireDataScope(req);
     const { id } = req.params;
 
     const [existingRows] = await db.query('SELECT * FROM suppliers WHERE id = ?', [id]);
@@ -177,7 +182,7 @@ export const deleteSupplier = async (req, res) => {
       return res.status(404).json({ message: 'Supplier not found' });
     }
 
-    assertScopeMatch(existingRows[0], req.dataScope);
+    assertScopeMatch(existingRows[0], scope);
 
     const poQuery = applyDataScopeFilter({
       baseSql: `
@@ -186,7 +191,7 @@ export const deleteSupplier = async (req, res) => {
         WHERE supplier_id = ?
       `,
       baseValues: [id],
-      scope: req.dataScope,
+      scope,
     });
 
     poQuery.sql += ' LIMIT 1';

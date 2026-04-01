@@ -1,17 +1,12 @@
 import db from '../config/db.js';
+import { requireDataScope } from '../middleware/dataScopeMiddleware.js';
 
 export const getLowStockReport = async (req, res) => {
   try {
     console.log('LOW_STOCK_REPORT_VERSION=2026-03-31-FIX-2');
 
     const threshold = Number(req.query.threshold || 10);
-    const { company_id, branch_id, business_unit_id } = req.dataScope || {};
-
-    if (!company_id || !branch_id || !business_unit_id) {
-      return res.status(400).json({
-        message: 'Missing organization scope',
-      });
-    }
+    const { company_id, branch_id, business_unit_id } = requireDataScope(req);
 
     const [rows] = await db.query(
       `

@@ -1,7 +1,9 @@
 import db from '../config/db.js';
+import { buildScopeWhereClause, requireDataScope } from '../middleware/dataScopeMiddleware.js';
 
 export const getAuditTrails = async (req, res) => {
   try {
+    const scope = requireDataScope(req);
     const {
       search = '',
       module_name = '',
@@ -9,6 +11,12 @@ export const getAuditTrails = async (req, res) => {
       user_id = '',
       limit = 200,
     } = req.query;
+
+    const scopeFilter = buildScopeWhereClause(scope, {
+      company: 'at.company_id',
+      branch: 'at.branch_id',
+      businessUnit: 'at.business_unit_id',
+    });
 
     let sql = `
       SELECT
@@ -26,9 +34,9 @@ export const getAuditTrails = async (req, res) => {
         at.created_at
       FROM audit_trails at
       LEFT JOIN users u ON u.id = at.user_id
-      WHERE 1 = 1
+      WHERE 1 = 1 ${scopeFilter.sql}
     `;
-    const values = [];
+    const values = [...scopeFilter.values];
 
     if (search) {
       sql += `
@@ -78,6 +86,6 @@ export const getAuditTrails = async (req, res) => {
     res.json(data);
   } catch (error) {
     console.error('Get audit trails error:', error);
-    res.status(500).json({ message: 'Failed to fetch audit trails' });
+    res.status(error.statusCode || 500).json({ message: error.message || 'Failed to fetch audit trails' });
   }
 };

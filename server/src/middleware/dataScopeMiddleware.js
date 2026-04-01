@@ -184,3 +184,17 @@ export const assertScopeMatch = (
 
   return true;
 };
+
+export const requireDataScope = (req) => {
+  const scope = normalizeScope(req?.dataScope || {});
+
+  if (!scope.company_id) {
+    const error = new Error(
+      'Missing active organization scope. Select a company / branch / business unit first.'
+    );
+    error.statusCode = 400;
+    throw error;
+  }
+
+  return scope;
+};

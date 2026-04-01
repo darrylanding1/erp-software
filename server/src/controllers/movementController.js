@@ -6,75 +6,104 @@ import {
   setWarehouseStockQuantity,
   transferWarehouseStock,
 } from '../utils/inventoryStock.js';
+import {
+  buildScopeWhereClause,
+  requireDataScope,
+} from '../middleware/dataScopeMiddleware.js';
 
-const ensureInventoryRow = async (connection, productId, warehouseId) => {
-  await connection.query(
+const buildWarehouseScope = (scope, alias = 'w') =>
+  buildScopeWhereClause(scope, {
+    company: `${alias}.company_id`,
+    branch: `${alias}.branch_id`,
+    businessUnit: `${alias}.business_unit_id`,
+  });
+
+const buildProductScope = (scope, alias = 'p') =>
+  buildScopeWhereClause(scope, {
+    company: `${alias}.company_id`,
+    branch: `${alias}.branch_id`,
+    businessUnit: `${alias}.business_unit_id`,
+  });
+
+const assertWarehouseInScope = async (connection, warehouseId, scope) => {
+  const warehouseScope = buildWarehouseScope(scope, 'w');
+  const [rows] = await connection.query(
     `
-    INSERT INTO inventory_stocks (product_id, warehouse_id, quantity)
-    VALUES (?, ?, 0)
-    ON DUPLICATE KEY UPDATE updated_at = updated_at
+    SELECT id, name, code, status
+    FROM warehouses w
+    WHERE w.id = ? ${warehouseScope.sql}
+    LIMIT 1
     `,
-    [productId, warehouseId]
+    [Number(warehouseId), ...warehouseScope.values]
   );
+
+  if (!rows.length) {
+    throw new Error('Warehouse not found in the active scope');
+  }
+
+  if (rows[0].status !== 'Active') {
+    throw new Error('Warehouse is inactive');
+  }
+
+  return rows[0];
 };
 
-const syncProductTotalFromWarehouses = async (connection, productId) => {
-  const [[stockSumRow]] = await connection.query(
+const assertProductInScope = async (connection, productId, scope) => {
+  const productScope = buildProductScope(scope, 'p');
+  const [rows] = await connection.query(
     `
-    SELECT COALESCE(SUM(quantity), 0) AS total_quantity
-    FROM inventory_stocks
-    WHERE product_id = ?
+    SELECT p.id, p.name, p.sku
+    FROM products p
+    WHERE p.id = ? ${productScope.sql}
+    LIMIT 1
     `,
-    [productId]
+    [Number(productId), ...productScope.values]
   );
 
-  const totalQuantity = Number(stockSumRow.total_quantity) || 0;
-  const status = getStockStatus(totalQuantity);
+  if (!rows.length) {
+    throw new Error('Product not found in the active scope');
+  }
 
-  await connection.query(
-    `
-    UPDATE products
-    SET quantity = ?, status = ?
-    WHERE id = ?
-    `,
-    [totalQuantity, status, productId]
-  );
-
-  return {
-    totalQuantity,
-    status,
-  };
+  return rows[0];
 };
 
 export const getMovementMeta = async (req, res) => {
   try {
+    const scope = requireDataScope(req);
+    const warehouseScope = buildWarehouseScope(scope, 'w');
+
     const [warehouses] = await db.query(
       `
       SELECT id, name, code, address, status
-      FROM warehouses
-      WHERE status = 'Active'
-      ORDER BY name ASC
-      `
+      FROM warehouses w
+      WHERE w.status = 'Active' ${warehouseScope.sql}
+      ORDER BY w.name ASC
+      `,
+      warehouseScope.values
     );
 
     res.json({ warehouses });
   } catch (error) {
     console.error('Get movement meta error:', error);
-    res.status(500).json({ message: 'Failed to fetch movement metadata' });
+    res.status(error.statusCode || 500).json({ message: error.message || 'Failed to fetch movement metadata' });
   }
 };
 
 export const getStockOverview = async (req, res) => {
   try {
+    const scope = requireDataScope(req);
     const { search = '' } = req.query;
+    const warehouseScope = buildWarehouseScope(scope, 'w');
+    const productScope = buildProductScope(scope, 'p');
 
     const [warehouses] = await db.query(
       `
       SELECT id, name, code, address, status
-      FROM warehouses
-      WHERE status = 'Active'
-      ORDER BY id ASC
-      `
+      FROM warehouses w
+      WHERE w.status = 'Active' ${warehouseScope.sql}
+      ORDER BY w.id ASC
+      `,
+      warehouseScope.values
     );
 
     let productSql = `
@@ -89,10 +118,14 @@ export const getStockOverview = async (req, res) => {
         p.created_at,
         c.name AS category_name
       FROM products p
-      LEFT JOIN categories c ON p.category_id = c.id
-      WHERE 1 = 1
+      LEFT JOIN categories c
+        ON p.category_id = c.id
+       AND c.company_id = p.company_id
+       AND (c.branch_id <=> p.branch_id)
+       AND (c.business_unit_id <=> p.business_unit_id)
+      WHERE 1 = 1 ${productScope.sql}
     `;
-    const productValues = [];
+    const productValues = [...productScope.values];
 
     if (search) {
       productSql += ` AND (p.name LIKE ? OR p.sku LIKE ?)`;
@@ -110,7 +143,11 @@ export const getStockOverview = async (req, res) => {
         s.warehouse_id,
         s.quantity
       FROM inventory_stocks s
-      `
+      INNER JOIN warehouses w ON w.id = s.warehouse_id
+      INNER JOIN products p ON p.id = s.product_id
+      WHERE 1 = 1 ${warehouseScope.sql} ${productScope.sql}
+      `,
+      [...warehouseScope.values, ...productScope.values]
     );
 
     const stockMap = new Map();
@@ -143,17 +180,17 @@ export const getStockOverview = async (req, res) => {
     });
   } catch (error) {
     console.error('Get stock overview error:', error);
-    res.status(500).json({ message: 'Failed to fetch stock overview' });
+    res.status(error.statusCode || 500).json({ message: error.message || 'Failed to fetch stock overview' });
   }
 };
 
 export const getTransfers = async (req, res) => {
   try {
-    const {
-      product_id = '',
-      warehouse_id = '',
-      search = '',
-    } = req.query;
+    const scope = requireDataScope(req);
+    const { product_id = '', warehouse_id = '', search = '' } = req.query;
+    const productScope = buildProductScope(scope, 'p');
+    const fromWarehouseScope = buildWarehouseScope(scope, 'fw');
+    const toWarehouseScope = buildWarehouseScope(scope, 'tw');
 
     let sql = `
       SELECT
@@ -168,9 +205,9 @@ export const getTransfers = async (req, res) => {
       INNER JOIN products p ON wt.product_id = p.id
       INNER JOIN warehouses fw ON wt.from_warehouse_id = fw.id
       INNER JOIN warehouses tw ON wt.to_warehouse_id = tw.id
-      WHERE 1 = 1
+      WHERE 1 = 1 ${productScope.sql} ${fromWarehouseScope.sql} ${toWarehouseScope.sql}
     `;
-    const values = [];
+    const values = [...productScope.values, ...fromWarehouseScope.values, ...toWarehouseScope.values];
 
     if (product_id) {
       sql += ` AND wt.product_id = ?`;
@@ -193,7 +230,7 @@ export const getTransfers = async (req, res) => {
     res.json(rows);
   } catch (error) {
     console.error('Get transfers error:', error);
-    res.status(500).json({ message: 'Failed to fetch warehouse transfers' });
+    res.status(error.statusCode || 500).json({ message: error.message || 'Failed to fetch warehouse transfers' });
   }
 };
 
@@ -202,6 +239,7 @@ export const createTransfer = async (req, res) => {
 
   try {
     await connection.beginTransaction();
+    const scope = requireDataScope(req);
 
     const {
       product_id,
@@ -217,14 +255,7 @@ export const createTransfer = async (req, res) => {
     const toWarehouseId = Number(to_warehouse_id);
     const qty = Number(quantity);
 
-    if (
-      !productId ||
-      !fromWarehouseId ||
-      !toWarehouseId ||
-      !qty ||
-      qty <= 0 ||
-      !transfer_date
-    ) {
+    if (!productId || !fromWarehouseId || !toWarehouseId || !qty || qty <= 0 || !transfer_date) {
       await connection.rollback();
       return res.status(400).json({ message: 'Invalid transfer data' });
     }
@@ -236,15 +267,9 @@ export const createTransfer = async (req, res) => {
       });
     }
 
-    const [productRows] = await connection.query(
-      `SELECT id, name, sku FROM products WHERE id = ?`,
-      [productId]
-    );
-
-    if (productRows.length === 0) {
-      await connection.rollback();
-      return res.status(404).json({ message: 'Product not found' });
-    }
+    const product = await assertProductInScope(connection, productId, scope);
+    await assertWarehouseInScope(connection, fromWarehouseId, scope);
+    await assertWarehouseInScope(connection, toWarehouseId, scope);
 
     let transferResult;
 
@@ -278,9 +303,12 @@ export const createTransfer = async (req, res) => {
         new_quantity,
         note,
         reference_number,
-        created_by
+        created_by,
+        company_id,
+        branch_id,
+        business_unit_id
       )
-      VALUES (?, ?, 'Transfer Out', 'Transfer', NULL, ?, ?, ?, ?, NULL, ?)
+      VALUES (?, ?, 'Transfer Out', 'Transfer', NULL, ?, ?, ?, ?, NULL, ?, ?, ?, ?)
       `,
       [
         productId,
@@ -290,6 +318,9 @@ export const createTransfer = async (req, res) => {
         fromNew,
         remarks || null,
         req.user?.id || null,
+        scope.company_id,
+        scope.branch_id,
+        scope.business_unit_id,
       ]
     );
 
@@ -306,9 +337,12 @@ export const createTransfer = async (req, res) => {
         new_quantity,
         note,
         reference_number,
-        created_by
+        created_by,
+        company_id,
+        branch_id,
+        business_unit_id
       )
-      VALUES (?, ?, 'Transfer In', 'Transfer', NULL, ?, ?, ?, ?, NULL, ?)
+      VALUES (?, ?, 'Transfer In', 'Transfer', NULL, ?, ?, ?, ?, NULL, ?, ?, ?, ?)
       `,
       [
         productId,
@@ -318,6 +352,9 @@ export const createTransfer = async (req, res) => {
         toNew,
         remarks || null,
         req.user?.id || null,
+        scope.company_id,
+        scope.branch_id,
+        scope.business_unit_id,
       ]
     );
 
@@ -328,7 +365,7 @@ export const createTransfer = async (req, res) => {
       action: 'CREATE',
       moduleName: 'Warehouse Transfers',
       recordId: transferInResult.insertId,
-      description: `Transferred ${qty} of ${productRows[0].name} from warehouse ${fromWarehouseId} to warehouse ${toWarehouseId}`,
+      description: `Transferred ${qty} of ${product.name} from warehouse ${fromWarehouseId} to warehouse ${toWarehouseId}`,
       newValues: {
         product_id: productId,
         from_warehouse_id: fromWarehouseId,
@@ -336,6 +373,9 @@ export const createTransfer = async (req, res) => {
         quantity: qty,
         transfer_date,
         remarks: remarks || null,
+        company_id: scope.company_id,
+        branch_id: scope.branch_id,
+        business_unit_id: scope.business_unit_id,
       },
       ipAddress: getRequestIp(req),
     });
@@ -344,7 +384,7 @@ export const createTransfer = async (req, res) => {
   } catch (error) {
     await connection.rollback();
     console.error('Create transfer error:', error);
-    res.status(500).json({ message: 'Failed to create transfer' });
+    res.status(error.statusCode || 500).json({ message: error.message || 'Failed to create transfer' });
   } finally {
     connection.release();
   }
@@ -352,11 +392,13 @@ export const createTransfer = async (req, res) => {
 
 export const getMovements = async (req, res) => {
   try {
-    const {
-      product_id = '',
-      movement_type = '',
-      warehouse_id = '',
-    } = req.query;
+    const scope = requireDataScope(req);
+    const { product_id = '', movement_type = '', warehouse_id = '' } = req.query;
+    const movementScope = buildScopeWhereClause(scope, {
+      company: 'sm.company_id',
+      branch: 'sm.branch_id',
+      businessUnit: 'sm.business_unit_id',
+    });
 
     let sql = `
       SELECT
@@ -368,9 +410,9 @@ export const getMovements = async (req, res) => {
       FROM stock_movements sm
       INNER JOIN products p ON sm.product_id = p.id
       LEFT JOIN warehouses w ON sm.warehouse_id = w.id
-      WHERE 1 = 1
+      WHERE 1 = 1 ${movementScope.sql}
     `;
-    const values = [];
+    const values = [...movementScope.values];
 
     if (product_id) {
       sql += ' AND sm.product_id = ?';
@@ -393,7 +435,7 @@ export const getMovements = async (req, res) => {
     res.json(rows);
   } catch (error) {
     console.error('Get movements error:', error);
-    res.status(500).json({ message: 'Failed to fetch stock movements' });
+    res.status(error.statusCode || 500).json({ message: error.message || 'Failed to fetch stock movements' });
   }
 };
 
@@ -402,14 +444,9 @@ export const createMovement = async (req, res) => {
 
   try {
     await connection.beginTransaction();
+    const scope = requireDataScope(req);
 
-    const {
-      product_id,
-      warehouse_id,
-      movement_type,
-      quantity,
-      note,
-    } = req.body;
+    const { product_id, warehouse_id, movement_type, quantity, note } = req.body;
 
     const productId = Number(product_id);
     const warehouseId = Number(warehouse_id);
@@ -420,15 +457,8 @@ export const createMovement = async (req, res) => {
       return res.status(400).json({ message: 'Invalid movement data' });
     }
 
-    const [productRows] = await connection.query(
-      `SELECT id, name, sku FROM products WHERE id = ?`,
-      [productId]
-    );
-
-    if (productRows.length === 0) {
-      await connection.rollback();
-      return res.status(404).json({ message: 'Product not found' });
-    }
+    const product = await assertProductInScope(connection, productId, scope);
+    await assertWarehouseInScope(connection, warehouseId, scope);
 
     let previousQty = 0;
     let newQty = 0;
@@ -473,24 +503,6 @@ export const createMovement = async (req, res) => {
           `,
           [newQty, newQty, productId, warehouseId]
         );
-
-        const [[sumRow]] = await connection.query(
-          `
-          SELECT COALESCE(SUM(quantity), 0) AS total_quantity
-          FROM inventory_stocks
-          WHERE product_id = ?
-          `,
-          [productId]
-        );
-
-        await connection.query(
-          `
-          UPDATE products
-          SET quantity = ?, status = ?
-          WHERE id = ?
-          `,
-          [Number(sumRow.total_quantity || 0), getStockStatus(sumRow.total_quantity), productId]
-        );
       } else if (movement_type === 'Adjustment') {
         const result = await setWarehouseStockQuantity(connection, {
           productId,
@@ -522,9 +534,12 @@ export const createMovement = async (req, res) => {
         new_quantity,
         note,
         reference_number,
-        created_by
+        created_by,
+        company_id,
+        branch_id,
+        business_unit_id
       )
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
       `,
       [
         productId,
@@ -538,6 +553,9 @@ export const createMovement = async (req, res) => {
         note || null,
         null,
         req.user?.id || null,
+        scope.company_id,
+        scope.branch_id,
+        scope.business_unit_id,
       ]
     );
 
@@ -552,6 +570,9 @@ export const createMovement = async (req, res) => {
       previous_quantity: previousQty,
       new_quantity: newQty,
       note: note || null,
+      company_id: scope.company_id,
+      branch_id: scope.branch_id,
+      business_unit_id: scope.business_unit_id,
     };
 
     await createAuditLog({
@@ -559,7 +580,7 @@ export const createMovement = async (req, res) => {
       action: 'CREATE',
       moduleName: 'Stock Movements',
       recordId: movementRecord.id,
-      description: `${movement_type} for product ${productRows[0].name} (${productRows[0].sku})`,
+      description: `${movement_type} for product ${product.name} (${product.sku})`,
       newValues: movementRecord,
       ipAddress: getRequestIp(req),
     });
@@ -571,7 +592,7 @@ export const createMovement = async (req, res) => {
   } catch (error) {
     await connection.rollback();
     console.error('Create movement error:', error);
-    res.status(500).json({ message: 'Failed to create stock movement' });
+    res.status(error.statusCode || 500).json({ message: error.message || 'Failed to create stock movement' });
   } finally {
     connection.release();
   }

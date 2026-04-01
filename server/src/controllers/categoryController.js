@@ -2,6 +2,7 @@ import db from '../config/db.js';
 import {
   applyDataScopeFilter,
   assertScopeMatch,
+  requireDataScope,
 } from '../middleware/dataScopeMiddleware.js';
 
 const mapScopeInsert = (scope) => ({
@@ -12,6 +13,7 @@ const mapScopeInsert = (scope) => ({
 
 export const getCategories = async (req, res) => {
   try {
+    const scope = requireDataScope(req);
     const { search = '' } = req.query;
 
     let query = applyDataScopeFilter({
@@ -20,7 +22,7 @@ export const getCategories = async (req, res) => {
         FROM categories
         WHERE 1 = 1
       `,
-      scope: req.dataScope,
+      scope,
     });
 
     if (search) {
@@ -41,7 +43,7 @@ export const getCategories = async (req, res) => {
 export const createCategory = async (req, res) => {
   try {
     const { name, description } = req.body;
-    const scope = mapScopeInsert(req.dataScope);
+    const scope = mapScopeInsert(requireDataScope(req));
 
     if (!name?.trim()) {
       return res.status(400).json({ message: 'Category name is required' });
@@ -100,6 +102,7 @@ export const createCategory = async (req, res) => {
 
 export const updateCategory = async (req, res) => {
   try {
+    const scope = requireDataScope(req);
     const { id } = req.params;
     const { name, description } = req.body;
 
@@ -113,7 +116,7 @@ export const updateCategory = async (req, res) => {
       return res.status(404).json({ message: 'Category not found' });
     }
 
-    assertScopeMatch(rows[0], req.dataScope);
+    assertScopeMatch(rows[0], scope);
 
     await db.query(
       `
@@ -144,6 +147,7 @@ export const updateCategory = async (req, res) => {
 
 export const deleteCategory = async (req, res) => {
   try {
+    const scope = requireDataScope(req);
     const { id } = req.params;
 
     const [categoryRows] = await db.query('SELECT * FROM categories WHERE id = ?', [id]);
@@ -152,7 +156,7 @@ export const deleteCategory = async (req, res) => {
       return res.status(404).json({ message: 'Category not found' });
     }
 
-    assertScopeMatch(categoryRows[0], req.dataScope);
+    assertScopeMatch(categoryRows[0], scope);
 
     const usedQuery = applyDataScopeFilter({
       baseSql: `
@@ -161,7 +165,7 @@ export const deleteCategory = async (req, res) => {
         WHERE category_id = ?
       `,
       baseValues: [id],
-      scope: req.dataScope,
+      scope,
     });
 
     const [usedRows] = await db.query(usedQuery.sql, usedQuery.values);

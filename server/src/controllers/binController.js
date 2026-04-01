@@ -5,29 +5,33 @@ import {
   updateBinService,
   updateBinStatusService,
 } from '../services/binService.js';
+import { requireDataScope } from '../middleware/dataScopeMiddleware.js';
 
-export const getBinMeta = async (_req, res) => {
+export const getBinMeta = async (req, res) => {
   try {
-    const data = await getBinMetaService();
+    const scope = requireDataScope(req);
+    const data = await getBinMetaService(scope);
     res.json(data);
   } catch (error) {
     console.error('Get bin meta error:', error);
-    res.status(500).json({ message: 'Failed to fetch bin metadata' });
+    res.status(error.statusCode || 500).json({ message: error.message || 'Failed to fetch bin metadata' });
   }
 };
 
 export const getBins = async (req, res) => {
   try {
-    const rows = await getBinsService(req.query);
+    const scope = requireDataScope(req);
+    const rows = await getBinsService(req.query, scope);
     res.json(rows);
   } catch (error) {
     console.error('Get bins error:', error);
-    res.status(500).json({ message: 'Failed to fetch bins' });
+    res.status(error.statusCode || 500).json({ message: error.message || 'Failed to fetch bins' });
   }
 };
 
 export const createBin = async (req, res) => {
   try {
+    const scope = requireDataScope(req);
     const {
       warehouse_id,
       zone_id,
@@ -56,7 +60,7 @@ export const createBin = async (req, res) => {
       allow_negative_stock,
       max_capacity_qty,
       sort_order,
-    });
+    }, scope);
 
     res.status(201).json({
       message: 'Bin created successfully',
@@ -71,13 +75,14 @@ export const createBin = async (req, res) => {
       });
     }
 
-    res.status(500).json({ message: 'Failed to create bin' });
+    res.status(error.statusCode || 500).json({ message: error.message || 'Failed to create bin' });
   }
 };
 
 export const updateBin = async (req, res) => {
   try {
-    const affectedRows = await updateBinService(req.params.id, req.body);
+    const scope = requireDataScope(req);
+    const affectedRows = await updateBinService(req.params.id, req.body, scope);
 
     if (!affectedRows) {
       return res.status(404).json({ message: 'Bin not found' });
@@ -93,15 +98,16 @@ export const updateBin = async (req, res) => {
       });
     }
 
-    res.status(500).json({ message: 'Failed to update bin' });
+    res.status(error.statusCode || 500).json({ message: error.message || 'Failed to update bin' });
   }
 };
 
 export const updateBinStatus = async (req, res) => {
   try {
+    const scope = requireDataScope(req);
     const { is_active } = req.body;
 
-    const affectedRows = await updateBinStatusService(req.params.id, is_active);
+    const affectedRows = await updateBinStatusService(req.params.id, is_active, scope);
 
     if (!affectedRows) {
       return res.status(404).json({ message: 'Bin not found' });
@@ -110,6 +116,6 @@ export const updateBinStatus = async (req, res) => {
     res.json({ message: 'Bin status updated successfully' });
   } catch (error) {
     console.error('Update bin status error:', error);
-    res.status(500).json({ message: 'Failed to update bin status' });
+    res.status(error.statusCode || 500).json({ message: error.message || 'Failed to update bin status' });
   }
 };

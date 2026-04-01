@@ -1,4 +1,5 @@
 import { withTransaction } from '../utils/dbTransaction.js';
+import { requireDataScope } from '../middleware/dataScopeMiddleware.js';
 import {
   getPurchaseRequisitionMetaService,
   getPurchaseRequisitionsService,
@@ -9,9 +10,9 @@ import {
   convertPurchaseRequisitionToPoService,
 } from '../services/purchaseRequisitionService.js';
 
-export const getPurchaseRequisitionMeta = async (_req, res) => {
+export const getPurchaseRequisitionMeta = async (req, res) => {
   try {
-    const data = await getPurchaseRequisitionMetaService();
+    const data = await getPurchaseRequisitionMetaService(requireDataScope(req));
     res.json(data);
   } catch (error) {
     console.error('Get purchase requisition meta error:', error);
@@ -21,7 +22,7 @@ export const getPurchaseRequisitionMeta = async (_req, res) => {
 
 export const getPurchaseRequisitions = async (req, res) => {
   try {
-    const data = await getPurchaseRequisitionsService(req.query);
+    const data = await getPurchaseRequisitionsService(req.query, requireDataScope(req));
     res.json(data);
   } catch (error) {
     console.error('Get purchase requisitions error:', error);
@@ -31,7 +32,7 @@ export const getPurchaseRequisitions = async (req, res) => {
 
 export const getPurchaseRequisitionById = async (req, res) => {
   try {
-    const data = await getPurchaseRequisitionByIdService(Number(req.params.id));
+    const data = await getPurchaseRequisitionByIdService(Number(req.params.id), requireDataScope(req));
 
     if (!data) {
       return res.status(404).json({ message: 'Purchase requisition not found' });
@@ -52,7 +53,8 @@ export const createPurchaseRequisitionFromMrpRun = async (req, res) => {
         Number(req.params.runId),
         req.body,
         req.user,
-        req.ip
+        req.ip,
+        requireDataScope(req)
       )
     );
 
@@ -70,7 +72,8 @@ export const submitPurchaseRequisition = async (req, res) => {
         connection,
         Number(req.params.id),
         req.user,
-        req.ip
+        req.ip,
+        requireDataScope(req)
       )
     );
 
@@ -88,7 +91,8 @@ export const approvePurchaseRequisition = async (req, res) => {
         connection,
         Number(req.params.id),
         req.user,
-        req.ip
+        req.ip,
+        requireDataScope(req)
       )
     );
 
@@ -107,7 +111,8 @@ export const convertPurchaseRequisitionToPo = async (req, res) => {
         Number(req.params.id),
         req.body,
         req.user,
-        req.ip
+        req.ip,
+        requireDataScope(req)
       )
     );
 

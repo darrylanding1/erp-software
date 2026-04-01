@@ -12,19 +12,25 @@ import {
   authenticate,
   authorizePermissions,
 } from '../middleware/authMiddleware.js';
+import { attachDataScope } from '../middleware/dataScopeMiddleware.js';
 
 const router = express.Router();
 
 router.use(authenticate);
 
-router.get('/meta', authorizePermissions('mrp.view'), getMrpMeta);
-router.get('/policies', authorizePermissions('mrp.view'), getMrpPolicies);
-router.post('/policies', authorizePermissions('mrp.run'), upsertMrpPolicy);
+router.get('/meta', authorizePermissions('mrp.view'), attachDataScope, getMrpMeta);
+router.get('/policies', authorizePermissions('mrp.view'), attachDataScope, getMrpPolicies);
+router.post('/policies', authorizePermissions('mrp.run'), attachDataScope, upsertMrpPolicy);
 
-router.get('/recommendations', authorizePermissions('mrp.view'), getMrpRecommendations);
+router.get(
+  '/recommendations',
+  authorizePermissions('mrp.view'),
+  attachDataScope,
+  getMrpRecommendations
+);
 
-router.get('/runs', authorizePermissions('mrp.view'), getMrpRuns);
-router.get('/runs/:id', authorizePermissions('mrp.view'), getMrpRunById);
-router.post('/runs', authorizePermissions('mrp.run'), createMrpRun);
+router.get('/runs', authorizePermissions('mrp.view'), attachDataScope, getMrpRuns);
+router.get('/runs/:id', authorizePermissions('mrp.view'), attachDataScope, getMrpRunById);
+router.post('/runs', authorizePermissions('mrp.run'), attachDataScope, createMrpRun);
 
 export default router;

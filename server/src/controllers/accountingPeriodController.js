@@ -4,6 +4,7 @@ import {
   assertPostingDateAllowed,
   generateMonthlyAccountingPeriods,
 } from '../services/accountingPeriodService.js';
+import { requireDataScope } from '../middleware/dataScopeMiddleware.js';
 
 const toNumber = (value, fallback = 0) => {
   const num = Number(value);
@@ -24,6 +25,8 @@ const writeAuditTrail = async (
   oldValues = null,
   newValues = null
 ) => {
+  const scope = requireDataScope(req);
+
   await connection.query(
     `
     INSERT INTO audit_trails (
@@ -34,9 +37,12 @@ const writeAuditTrail = async (
       description,
       old_values,
       new_values,
-      ip_address
+      ip_address,
+      company_id,
+      branch_id,
+      business_unit_id
     )
-    VALUES (?, ?, 'Accounting Periods', ?, ?, ?, ?, ?)
+    VALUES (?, ?, 'Accounting Periods', ?, ?, ?, ?, ?, ?, ?, ?)
     `,
     [
       getUserId(req),
@@ -46,12 +52,16 @@ const writeAuditTrail = async (
       oldValues ? JSON.stringify(oldValues) : null,
       newValues ? JSON.stringify(newValues) : null,
       req.ip || req.headers['x-forwarded-for'] || null,
+      scope.company_id,
+      scope.branch_id,
+      scope.business_unit_id,
     ]
   );
 };
 
 export const getAccountingPeriods = async (req, res) => {
   try {
+    requireDataScope(req);
     const {
       year = '',
       status = '',
@@ -122,6 +132,7 @@ export const getAccountingPeriods = async (req, res) => {
 
 export const generateAccountingPeriods = async (req, res) => {
   try {
+    requireDataScope(req);
     const {
       start_year = new Date().getFullYear(),
       start_month = 1,
@@ -148,6 +159,7 @@ export const generateAccountingPeriods = async (req, res) => {
 
 export const getPostingLockStatus = async (req, res) => {
   try {
+    requireDataScope(req);
     const { posting_date = today() } = req.query;
 
     const period = await findAccountingPeriodByDate(db, posting_date);
@@ -429,6 +441,7 @@ export const reopenAccountingPeriod = async (req, res) => {
 
 export const validatePostingDate = async (req, res) => {
   try {
+    requireDataScope(req);
     const {
       posting_date = today(),
       allow_soft_closed_for_admin = 'true',

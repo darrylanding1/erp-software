@@ -1,35 +1,27 @@
 import db from '../config/db.js';
+import {
+  assertScopeMatch,
+  buildScopeWhereClause,
+  requireDataScope,
+} from '../middleware/dataScopeMiddleware.js';
 
 const round2 = (value) => Number(Number(value || 0).toFixed(2));
 
-const getNextNumber = async (prefix, table, column, connection = db) => {
-  const [rows] = await connection.query(
-    `
-    SELECT ${column} AS document_number
-    FROM ${table}
-    ORDER BY id DESC
-    LIMIT 1
-    `
-  );
-
-  if (!rows.length || !rows[0].document_number) {
-    return `${prefix}-00001`;
-  }
-
-  const currentNumber = rows[0].document_number;
-  const numericPart = Number(String(currentNumber).split('-').pop() || 0) + 1;
-  return `${prefix}-${String(numericPart).padStart(5, '0')}`;
+const getNextNumber = async (prefix) => {
+  const stamp = Date.now();
+  const suffix = Math.floor(Math.random() * 1000).toString().padStart(3, '0');
+  return `${prefix}-${stamp}${suffix}`;
 };
 
-const getAccountByCode = async (accountCode, connection = db) => {
+const getAccountByCode = async (accountCode, scope, connection = db) => {
   const [rows] = await connection.query(
     `
-    SELECT id, account_code, account_name
+    SELECT id, account_code, account_name, company_id, branch_id, business_unit_id
     FROM chart_of_accounts
-    WHERE account_code = ?
+    WHERE account_code = ? AND company_id = ? AND branch_id <=> ? AND business_unit_id <=> ?
     LIMIT 1
     `,
-    [accountCode]
+    [accountCode, scope.company_id, scope.branch_id, scope.business_unit_id]
   );
 
   return rows[0] || null;
@@ -37,7 +29,9 @@ const getAccountByCode = async (accountCode, connection = db) => {
 
 export const getRefundCandidates = async (req, res) => {
   try {
+    const scope = requireDataScope(req);
     const { customer_id = '', sales_invoice_id = '' } = req.query;
+    const customerScope = buildScopeWhereClause(scope, { company: 'c.company_id', branch: 'c.branch_id', businessUnit: 'c.business_unit_id' });
 
     let sql = `
       SELECT
@@ -54,6 +48,9 @@ export const getRefundCandidates = async (req, res) => {
         si.invoice_date,
         si.total_amount AS invoice_total,
         c.name AS customer_name,
+        c.company_id,
+        c.branch_id,
+        c.business_unit_id,
         COALESCE((
           SELECT SUM(cp.amount_paid)
           FROM customer_payments cp
@@ -70,9 +67,9 @@ export const getRefundCandidates = async (req, res) => {
         ON si.id = acm.sales_invoice_id
       INNER JOIN customers c
         ON c.id = acm.customer_id
-      WHERE acm.status = 'Posted'
+      WHERE acm.status = 'Posted' ${customerScope.sql}
     `;
-    const values = [];
+    const values = [...customerScope.values];
 
     if (customer_id) {
       sql += ` AND acm.customer_id = ?`;
@@ -119,6 +116,7 @@ export const getRefundCandidates = async (req, res) => {
 
 export const getCustomerRefunds = async (req, res) => {
   try {
+    const scope = requireDataScope(req);
     const {
       customer_id = '',
       sales_invoice_id = '',
@@ -150,9 +148,9 @@ export const getCustomerRefunds = async (req, res) => {
         ON si.id = cr.sales_invoice_id
       INNER JOIN customers c
         ON c.id = cr.customer_id
-      WHERE 1 = 1
+      WHERE 1 = 1 ${buildScopeWhereClause(scope, { company: 'c.company_id', branch: 'c.branch_id', businessUnit: 'c.business_unit_id' }).sql}
     `;
-    const values = [];
+    const values = [...buildScopeWhereClause(scope, { company: 'c.company_id', branch: 'c.branch_id', businessUnit: 'c.business_unit_id' }).values];
 
     if (customer_id) {
       sql += ` AND cr.customer_id = ?`;
@@ -207,6 +205,7 @@ export const createCustomerRefund = async (req, res) => {
   const connection = await db.getConnection();
 
   try {
+    const scope = requireDataScope(req);
     await connection.beginTransaction();
 
     const {
@@ -268,6 +267,8 @@ export const createCustomerRefund = async (req, res) => {
       return res.status(404).json({ message: 'Posted AR credit memo not found' });
     }
 
+    assertScopeMatch(creditMemo, scope);
+
     const invoiceTotal = round2(creditMemo.invoice_total);
     const totalPaid = round2(creditMemo.total_paid);
     const totalCreditMemo = round2(creditMemo.total_amount);
@@ -290,8 +291,8 @@ export const createCustomerRefund = async (req, res) => {
       });
     }
 
-    const arAccount = await getAccountByCode('1100', connection);
-    const cashAccount = await getAccountByCode('1000', connection);
+    const arAccount = await getAccountByCode('1100', scope, connection);
+    const cashAccount = await getAccountByCode('1000', scope, connection);
 
     if (!arAccount || !cashAccount) {
       await connection.rollback();
@@ -301,7 +302,7 @@ export const createCustomerRefund = async (req, res) => {
       });
     }
 
-    const refundNumber = await getNextNumber('RF', 'customer_refunds', 'refund_number', connection);
+    const refundNumber = await getNextNumber('RF');
 
     const [refundResult] = await connection.query(
       `
@@ -316,9 +317,12 @@ export const createCustomerRefund = async (req, res) => {
         reference_number,
         status,
         remarks,
-        amount_refunded
+        amount_refunded,
+        company_id,
+        branch_id,
+        business_unit_id
       )
-      VALUES (?, ?, ?, ?, ?, ?, ?, 'Posted', ?, ?)
+      VALUES (?, ?, ?, ?, ?, ?, ?, 'Posted', ?, ?, ?, ?, ?)
       `,
       [
         refundNumber,
@@ -330,10 +334,13 @@ export const createCustomerRefund = async (req, res) => {
         reference_number?.trim() || null,
         remarks?.trim() || null,
         refundAmount,
+        scope.company_id,
+        scope.branch_id,
+        scope.business_unit_id,
       ]
     );
 
-    const entryNumber = await getNextNumber('JE', 'journal_entries', 'entry_number', connection);
+    const entryNumber = await getNextNumber('JE');
 
     const [entryResult] = await connection.query(
       `
@@ -346,9 +353,12 @@ export const createCustomerRefund = async (req, res) => {
         memo,
         total_debit,
         total_credit,
-        status
+        status,
+        company_id,
+        branch_id,
+        business_unit_id
       )
-      VALUES (?, ?, 'Customer Refund', ?, ?, ?, ?, 'Posted')
+      VALUES (?, ?, 'Customer Refund', ?, ?, ?, ?, 'Posted', ?, ?, ?)
       `,
       [
         entryNumber,
@@ -357,6 +367,9 @@ export const createCustomerRefund = async (req, res) => {
         `Customer refund for ${refundNumber}`,
         refundAmount,
         refundAmount,
+        scope.company_id,
+        scope.branch_id,
+        scope.business_unit_id,
       ]
     );
 

@@ -1,36 +1,24 @@
 import db from '../config/db.js';
+import { buildScopeWhereClause, requireDataScope } from '../middleware/dataScopeMiddleware.js';
 import { decreaseWarehouseStock } from '../utils/inventoryStock.js';
 
 const round2 = (value) => Number(Number(value || 0).toFixed(2));
 
-const getNextNumber = async (prefix, table, column) => {
-  const [rows] = await db.query(
-    `
-    SELECT ${column} AS document_number
-    FROM ${table}
-    ORDER BY id DESC
-    LIMIT 1
-    `
-  );
-
-  if (!rows.length || !rows[0].document_number) {
-    return `${prefix}-00001`;
-  }
-
-  const currentNumber = rows[0].document_number;
-  const numericPart = Number(String(currentNumber).split('-').pop() || 0) + 1;
-  return `${prefix}-${String(numericPart).padStart(5, '0')}`;
+const getNextNumber = async (prefix) => {
+  const stamp = Date.now().toString().slice(-8);
+  const random = Math.floor(Math.random() * 1000).toString().padStart(3, '0');
+  return `${prefix}-${stamp}${random}`;
 };
 
-const getAccountByCode = async (accountCode) => {
+const getAccountByCode = async (accountCode, scope) => {
   const [rows] = await db.query(
     `
     SELECT id, account_code, account_name, account_type
     FROM chart_of_accounts
-    WHERE account_code = ?
+    WHERE account_code = ? AND company_id = ? AND branch_id = ? AND business_unit_id = ?
     LIMIT 1
     `,
-    [accountCode]
+    [accountCode, scope.company_id, scope.branch_id, scope.business_unit_id]
   );
 
   return rows[0] || null;
@@ -38,6 +26,7 @@ const getAccountByCode = async (accountCode) => {
 
 export const getDeliveryCandidates = async (req, res) => {
   try {
+    const scope = requireDataScope(req);
     const { customer_id = '', warehouse_id = '' } = req.query;
 
     let sql = `
@@ -54,8 +43,11 @@ export const getDeliveryCandidates = async (req, res) => {
       INNER JOIN customers c
         ON c.id = si.customer_id
       WHERE si.status IN ('Posted', 'Paid')
+        AND si.company_id = ?
+        AND si.branch_id = ?
+        AND si.business_unit_id = ?
     `;
-    const values = [];
+    const values = [scope.company_id, scope.branch_id, scope.business_unit_id];
 
     if (customer_id) {
       sql += ` AND si.customer_id = ?`;
@@ -90,14 +82,20 @@ export const getDeliveryCandidates = async (req, res) => {
             ON sd.id = sdi.sales_delivery_id
           WHERE sdi.sales_invoice_item_id = sii.id
             AND sd.status = 'Posted'
+            AND sd.company_id = ?
+            AND sd.branch_id = ?
+            AND sd.business_unit_id = ?
         ), 0) AS delivered_quantity
       FROM sales_invoice_items sii
       INNER JOIN products p
         ON p.id = sii.product_id
       WHERE sii.sales_invoice_id IN (?)
+        AND p.company_id = ?
+        AND p.branch_id = ?
+        AND p.business_unit_id = ?
       ORDER BY sii.sales_invoice_id DESC, sii.id ASC
       `,
-      [invoiceIds]
+      [scope.company_id, scope.branch_id, scope.business_unit_id, invoiceIds, scope.company_id, scope.branch_id, scope.business_unit_id]
     );
 
     const warehouseId = Number(warehouse_id) || null;
@@ -119,8 +117,11 @@ export const getDeliveryCandidates = async (req, res) => {
           FROM inventory_stocks
           WHERE warehouse_id = ?
             AND product_id IN (?)
+            AND company_id = ?
+            AND branch_id = ?
+            AND business_unit_id = ?
           `,
-          [warehouseId, productIds]
+          [warehouseId, productIds, scope.company_id, scope.branch_id, scope.business_unit_id]
         );
 
         stockMap = new Map(
@@ -173,6 +174,7 @@ export const getDeliveryCandidates = async (req, res) => {
 
 export const getSalesDeliveries = async (req, res) => {
   try {
+    const scope = requireDataScope(req);
     const {
       sales_invoice_id = '',
       warehouse_id = '',
@@ -204,9 +206,11 @@ export const getSalesDeliveries = async (req, res) => {
         ON c.id = si.customer_id
       INNER JOIN warehouses w
         ON w.id = sd.warehouse_id
-      WHERE 1 = 1
+      WHERE sd.company_id = ?
+        AND sd.branch_id = ?
+        AND sd.business_unit_id = ?
     `;
-    const values = [];
+    const values = [scope.company_id, scope.branch_id, scope.business_unit_id];
 
     if (sales_invoice_id) {
       sql += ` AND sd.sales_invoice_id = ?`;
@@ -287,12 +291,15 @@ export const getSalesDeliveries = async (req, res) => {
 
 export const getDeliveryDashboardSummary = async (req, res) => {
   try {
+    const scope = requireDataScope(req);
     const [[summary]] = await db.query(
       `
       SELECT
         COALESCE((
           SELECT SUM(quantity)
-          FROM sales_invoice_items
+          FROM sales_invoice_items sii
+          INNER JOIN sales_invoices si ON si.id = sii.sales_invoice_id
+          WHERE si.company_id = ? AND si.branch_id = ? AND si.business_unit_id = ?
         ), 0) AS billed_quantity,
         COALESCE((
           SELECT SUM(sdi.delivered_quantity)
@@ -300,6 +307,7 @@ export const getDeliveryDashboardSummary = async (req, res) => {
           INNER JOIN sales_deliveries sd
             ON sd.id = sdi.sales_delivery_id
           WHERE sd.status = 'Posted'
+            AND sd.company_id = ? AND sd.branch_id = ? AND sd.business_unit_id = ?
         ), 0) AS delivered_quantity,
         COALESCE((
           SELECT SUM(sri.returned_quantity)
@@ -307,23 +315,35 @@ export const getDeliveryDashboardSummary = async (req, res) => {
           INNER JOIN sales_returns sr
             ON sr.id = sri.sales_return_id
           WHERE sr.status = 'Posted'
+            AND sr.company_id = ? AND sr.branch_id = ? AND sr.business_unit_id = ?
         ), 0) AS returned_quantity,
         COALESCE((
           SELECT COUNT(*)
           FROM sales_invoices
           WHERE delivery_status = 'Not Delivered'
+            AND company_id = ? AND branch_id = ? AND business_unit_id = ?
         ), 0) AS not_delivered_count,
         COALESCE((
           SELECT COUNT(*)
           FROM sales_invoices
           WHERE delivery_status = 'Partial Delivered'
+            AND company_id = ? AND branch_id = ? AND business_unit_id = ?
         ), 0) AS partial_delivered_count,
         COALESCE((
           SELECT COUNT(*)
           FROM sales_invoices
           WHERE delivery_status = 'Fully Delivered'
+            AND company_id = ? AND branch_id = ? AND business_unit_id = ?
         ), 0) AS fully_delivered_count
-      `
+      `,
+      [
+        scope.company_id, scope.branch_id, scope.business_unit_id,
+        scope.company_id, scope.branch_id, scope.business_unit_id,
+        scope.company_id, scope.branch_id, scope.business_unit_id,
+        scope.company_id, scope.branch_id, scope.business_unit_id,
+        scope.company_id, scope.branch_id, scope.business_unit_id,
+        scope.company_id, scope.branch_id, scope.business_unit_id,
+      ]
     );
 
     res.json({
@@ -352,7 +372,7 @@ export const createSalesDelivery = async (req, res) => {
       FROM sales_invoice_items
       WHERE sales_invoice_id = ?
       `,
-      [salesInvoiceId]
+      [salesInvoiceId, scope.company_id, scope.branch_id, scope.business_unit_id]
     );
 
     const [[deliveredQtyRow]] = await connection.query(
@@ -391,6 +411,7 @@ export const createSalesDelivery = async (req, res) => {
   };
 
   try {
+    const scope = requireDataScope(req);
     await connection.beginTransaction();
 
     const {
@@ -420,6 +441,9 @@ export const createSalesDelivery = async (req, res) => {
         si.status
       FROM sales_invoices si
       WHERE si.id = ?
+        AND si.company_id = ?
+        AND si.branch_id = ?
+        AND si.business_unit_id = ?
       LIMIT 1
       `,
       [salesInvoiceId]
@@ -442,9 +466,12 @@ export const createSalesDelivery = async (req, res) => {
       SELECT id, name, code, status
       FROM warehouses
       WHERE id = ?
+        AND company_id = ?
+        AND branch_id = ?
+        AND business_unit_id = ?
       LIMIT 1
       `,
-      [warehouseId]
+      [warehouseId, scope.company_id, scope.branch_id, scope.business_unit_id]
     );
 
     if (!warehouse) {
@@ -457,8 +484,8 @@ export const createSalesDelivery = async (req, res) => {
       return res.status(400).json({ message: 'Warehouse is inactive' });
     }
 
-    const cogsAccount = await getAccountByCode('5000');
-    const inventoryAccount = await getAccountByCode('1200');
+    const cogsAccount = await getAccountByCode('5000', scope);
+    const inventoryAccount = await getAccountByCode('1200', scope);
 
     if (!cogsAccount || !inventoryAccount) {
       await connection.rollback();
@@ -577,11 +604,7 @@ export const createSalesDelivery = async (req, res) => {
       totalQuantity += deliverQty;
     }
 
-    const deliveryNumber = await getNextNumber(
-      'DN',
-      'sales_deliveries',
-      'delivery_number'
-    );
+    const deliveryNumber = await getNextNumber('DN');
 
     const [deliveryResult] = await connection.query(
       `
@@ -594,9 +617,12 @@ export const createSalesDelivery = async (req, res) => {
         status,
         remarks,
         total_quantity,
-        total_cost
+        total_cost,
+        company_id,
+        branch_id,
+        business_unit_id
       )
-      VALUES (?, ?, ?, ?, 'Posted', ?, ?, ?)
+      VALUES (?, ?, ?, ?, 'Posted', ?, ?, ?, ?, ?, ?)
       `,
       [
         deliveryNumber,
@@ -606,6 +632,9 @@ export const createSalesDelivery = async (req, res) => {
         remarks?.trim() || null,
         totalQuantity,
         0,
+        scope.company_id,
+        scope.branch_id,
+        scope.business_unit_id,
       ]
     );
 
@@ -661,9 +690,12 @@ export const createSalesDelivery = async (req, res) => {
           previous_quantity,
           new_quantity,
           note,
-          reference_number
+          reference_number,
+          company_id,
+          branch_id,
+          business_unit_id
         )
-        VALUES (?, ?, 'Stock Out', 'Sales Delivery', ?, ?, ?, ?, ?, ?)
+        VALUES (?, ?, 'Stock Out', 'Sales Delivery', ?, ?, ?, ?, ?, ?, ?, ?, ?)
         `,
         [
           item.product_id,
@@ -674,6 +706,9 @@ export const createSalesDelivery = async (req, res) => {
           item.new_quantity,
           `Delivery ${deliveryNumber} for invoice ${invoice.invoice_number}`,
           deliveryNumber,
+          scope.company_id,
+          scope.branch_id,
+          scope.business_unit_id,
         ]
       );
     }
@@ -687,7 +722,7 @@ export const createSalesDelivery = async (req, res) => {
       [totalCost, salesDeliveryId]
     );
 
-    const entryNumber = await getNextNumber('JE', 'journal_entries', 'entry_number');
+    const entryNumber = await getNextNumber('JE');
 
     const [entryResult] = await connection.query(
       `
@@ -700,9 +735,12 @@ export const createSalesDelivery = async (req, res) => {
         memo,
         total_debit,
         total_credit,
-        status
+        status,
+        company_id,
+        branch_id,
+        business_unit_id
       )
-      VALUES (?, ?, 'Sales Delivery', ?, ?, ?, ?, 'Posted')
+      VALUES (?, ?, 'Sales Delivery', ?, ?, ?, ?, 'Posted', ?, ?, ?)
       `,
       [
         entryNumber,
@@ -711,6 +749,9 @@ export const createSalesDelivery = async (req, res) => {
         `COGS posting for ${deliveryNumber}`,
         totalCost,
         totalCost,
+        scope.company_id,
+        scope.branch_id,
+        scope.business_unit_id,
       ]
     );
 
@@ -768,8 +809,11 @@ export const createSalesDelivery = async (req, res) => {
       INNER JOIN warehouses w
         ON w.id = sd.warehouse_id
       WHERE sd.id = ?
+        AND sd.company_id = ?
+        AND sd.branch_id = ?
+        AND sd.business_unit_id = ?
       `,
-      [salesDeliveryId]
+      [salesDeliveryId, scope.company_id, scope.branch_id, scope.business_unit_id]
     );
 
     res.status(201).json(rows[0]);

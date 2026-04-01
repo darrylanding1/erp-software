@@ -1,9 +1,12 @@
 import db from '../config/db.js';
-import { buildScopeWhereClause } from '../middleware/dataScopeMiddleware.js';
+import {
+  buildScopeWhereClause,
+  requireDataScope,
+} from '../middleware/dataScopeMiddleware.js';
 
 export const getDashboardData = async (req, res) => {
   try {
-    const scope = req.dataScope || {};
+    const scope = requireDataScope(req);
 
     const productScope = buildScopeWhereClause(scope, {
       company: 'p.company_id',
@@ -91,7 +94,8 @@ export const getDashboardData = async (req, res) => {
     let totalUsers = 0;
     try {
       const [[usersCount]] = await db.query(
-        'SELECT COUNT(*) AS totalUsers FROM users'
+        'SELECT COUNT(*) AS totalUsers FROM users WHERE default_company_id = ?',
+        [scope.company_id]
       );
       totalUsers = usersCount.totalUsers;
     } catch (_error) {
@@ -114,6 +118,9 @@ export const getDashboardData = async (req, res) => {
       FROM products p
       LEFT JOIN categories c
         ON p.category_id = c.id
+       AND c.company_id = p.company_id
+       AND (c.branch_id <=> p.branch_id)
+       AND (c.business_unit_id <=> p.business_unit_id)
       LEFT JOIN inventory_stocks s
         ON s.product_id = p.id
        ${stockScope.sql}
@@ -161,8 +168,8 @@ export const getDashboardData = async (req, res) => {
     });
   } catch (error) {
     console.error('Get dashboard data error:', error);
-    res.status(500).json({
-      message: 'Failed to fetch dashboard data',
+    res.status(error.statusCode || 500).json({
+      message: error.message || 'Failed to fetch dashboard data',
       error: error.message,
     });
   }

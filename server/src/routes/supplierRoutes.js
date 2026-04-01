@@ -10,15 +10,16 @@ import {
   authenticate,
   authorizePermissions,
 } from '../middleware/authMiddleware.js';
+import { attachDataScope } from '../middleware/dataScopeMiddleware.js';
 
 const router = express.Router();
 
 router.use(authenticate);
 
-router.get('/', authorizePermissions('suppliers.view'), getSuppliers);
-router.get('/:id', authorizePermissions('suppliers.view'), getSupplierById);
-router.post('/', authorizePermissions('suppliers.create'), createSupplier);
-router.put('/:id', authorizePermissions('suppliers.update'), updateSupplier);
-router.delete('/:id', authorizePermissions('suppliers.delete'), deleteSupplier);
+router.get('/', authorizePermissions('suppliers.view'), attachDataScope, getSuppliers);
+router.get('/:id', authorizePermissions('suppliers.view'), attachDataScope, getSupplierById);
+router.post('/', authorizePermissions('suppliers.create'), attachDataScope, createSupplier);
+router.put('/:id', authorizePermissions('suppliers.update'), attachDataScope, updateSupplier);
+router.delete('/:id', authorizePermissions('suppliers.delete'), attachDataScope, deleteSupplier);
 
 export default router;

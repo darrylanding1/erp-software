@@ -5,6 +5,10 @@ import {
   initializeProductInventoryRows,
   syncProductInventorySummary,
 } from '../utils/inventoryStock.js';
+import {
+  buildScopeWhereClause,
+  requireDataScope,
+} from '../middleware/dataScopeMiddleware.js';
 
 const stockStatusSql = `
   CASE
@@ -39,7 +43,21 @@ const cleanText = (value) => {
   return trimmed ? trimmed : null;
 };
 
-const getProductById = async (id) => {
+const getProductScopeClause = (scope, alias = 'p') =>
+  buildScopeWhereClause(scope, {
+    company: `${alias}.company_id`,
+    branch: `${alias}.branch_id`,
+    businessUnit: `${alias}.business_unit_id`,
+  });
+
+const mapScopeInsert = (scope) => ({
+  company_id: scope?.company_id ?? null,
+  branch_id: scope?.branch_id ?? null,
+  business_unit_id: scope?.business_unit_id ?? null,
+});
+
+const getProductById = async (id, scope) => {
+  const productScope = getProductScopeClause(scope, 'p');
   const [rows] = await db.query(
     `
     SELECT
@@ -78,6 +96,9 @@ const getProductById = async (id) => {
       p.picking_strategy,
       p.is_lot_tracked,
       p.is_serial_tracked,
+      p.company_id,
+      p.branch_id,
+      p.business_unit_id,
       c.name AS category_name,
       COALESCE(stock.total_quantity, 0) AS quantity,
       COALESCE(stock.total_reserved_quantity, 0) AS reserved_quantity,
@@ -85,19 +106,27 @@ const getProductById = async (id) => {
       COALESCE(stock.total_value, 0) AS stock_value,
       ${stockStatusSql} AS status
     FROM products p
-    LEFT JOIN categories c ON p.category_id = c.id
-    LEFT JOIN warehouses pw ON p.preferred_warehouse_id = pw.id
+    LEFT JOIN categories c
+      ON p.category_id = c.id
+     AND c.company_id = p.company_id
+     AND (c.branch_id <=> p.branch_id)
+     AND (c.business_unit_id <=> p.business_unit_id)
+    LEFT JOIN warehouses pw
+      ON p.preferred_warehouse_id = pw.id
+     AND pw.company_id = p.company_id
+     AND (pw.branch_id <=> p.branch_id)
+     AND (pw.business_unit_id <=> p.business_unit_id)
     ${getProductStockSummaryQuery()}
-    WHERE p.id = ?
+    WHERE p.id = ? ${productScope.sql}
     LIMIT 1
     `,
-    [id]
+    [id, ...productScope.values]
   );
 
   return rows[0] || null;
 };
 
-const validateProductPayload = async ({ productId = null, payload }) => {
+const validateProductPayload = async ({ productId = null, payload, scope }) => {
   const errors = [];
 
   if (!payload.name) errors.push('Name is required');
@@ -116,22 +145,52 @@ const validateProductPayload = async ({ productId = null, payload }) => {
   }
 
   if (payload.category_id) {
-    const [categoryRows] = await db.query(
-      'SELECT id FROM categories WHERE id = ? LIMIT 1',
-      [payload.category_id]
+    const [[category]] = await db.query(
+      `
+      SELECT id
+      FROM categories
+      WHERE id = ?
+        AND company_id = ?
+        AND (? IS NULL OR branch_id <=> ?)
+        AND (? IS NULL OR business_unit_id <=> ?)
+      LIMIT 1
+      `,
+      [
+        payload.category_id,
+        scope.company_id,
+        scope.branch_id,
+        scope.branch_id,
+        scope.business_unit_id,
+        scope.business_unit_id,
+      ]
     );
-    if (categoryRows.length === 0) {
-      errors.push('Selected category was not found');
+    if (!category) {
+      errors.push('Selected category was not found in the active scope');
     }
   }
 
   if (payload.preferred_warehouse_id) {
-    const [warehouseRows] = await db.query(
-      'SELECT id FROM warehouses WHERE id = ? LIMIT 1',
-      [payload.preferred_warehouse_id]
+    const [[warehouse]] = await db.query(
+      `
+      SELECT id
+      FROM warehouses
+      WHERE id = ?
+        AND company_id = ?
+        AND (? IS NULL OR branch_id <=> ?)
+        AND (? IS NULL OR business_unit_id <=> ?)
+      LIMIT 1
+      `,
+      [
+        payload.preferred_warehouse_id,
+        scope.company_id,
+        scope.branch_id,
+        scope.branch_id,
+        scope.business_unit_id,
+        scope.business_unit_id,
+      ]
     );
-    if (warehouseRows.length === 0) {
-      errors.push('Selected preferred warehouse was not found');
+    if (!warehouse) {
+      errors.push('Selected preferred warehouse was not found in the active scope');
     }
   }
 
@@ -149,8 +208,18 @@ const validateProductPayload = async ({ productId = null, payload }) => {
       SELECT COALESCE(SUM(quantity), 0) AS total_quantity
       FROM inventory_stocks
       WHERE product_id = ?
+        AND company_id = ?
+        AND (? IS NULL OR branch_id <=> ?)
+        AND (? IS NULL OR business_unit_id <=> ?)
       `,
-      [productId]
+      [
+        productId,
+        scope.company_id,
+        scope.branch_id,
+        scope.branch_id,
+        scope.business_unit_id,
+        scope.business_unit_id,
+      ]
     );
 
     const hasStock = Number(stockRow?.total_quantity || 0) > 0;
@@ -209,23 +278,38 @@ const mapRequestToProductPayload = (req) => {
   };
 };
 
-export const getProductMeta = async (_req, res) => {
+export const getProductMeta = async (req, res) => {
   try {
+    const scope = requireDataScope(req);
+    const categoryScope = buildScopeWhereClause(scope, {
+      company: 'c.company_id',
+      branch: 'c.branch_id',
+      businessUnit: 'c.business_unit_id',
+    });
+    const warehouseScope = buildScopeWhereClause(scope, {
+      company: 'w.company_id',
+      branch: 'w.branch_id',
+      businessUnit: 'w.business_unit_id',
+    });
+
     const [categories] = await db.query(
       `
-      SELECT id, name
-      FROM categories
-      ORDER BY name ASC
-      `
+      SELECT c.id, c.name
+      FROM categories c
+      WHERE 1 = 1 ${categoryScope.sql}
+      ORDER BY c.name ASC
+      `,
+      categoryScope.values
     );
 
     const [warehouses] = await db.query(
       `
-      SELECT id, name, code
-      FROM warehouses
-      WHERE status = 'Active'
-      ORDER BY name ASC
-      `
+      SELECT w.id, w.name, w.code
+      FROM warehouses w
+      WHERE w.status = 'Active' ${warehouseScope.sql}
+      ORDER BY w.name ASC
+      `,
+      warehouseScope.values
     );
 
     res.json({
@@ -240,12 +324,13 @@ export const getProductMeta = async (_req, res) => {
     });
   } catch (error) {
     console.error('Get product meta error:', error);
-    res.status(500).json({ message: 'Failed to fetch product meta' });
+    res.status(error.statusCode || 500).json({ message: error.message || 'Failed to fetch product meta' });
   }
 };
 
 export const getProducts = async (req, res) => {
   try {
+    const scope = requireDataScope(req);
     const {
       search = '',
       category_id = '',
@@ -255,6 +340,7 @@ export const getProducts = async (req, res) => {
       track_inventory = '',
     } = req.query;
 
+    const productScope = getProductScopeClause(scope, 'p');
     let sql = `
       SELECT
         p.id,
@@ -292,6 +378,9 @@ export const getProducts = async (req, res) => {
         p.picking_strategy,
         p.is_lot_tracked,
         p.is_serial_tracked,
+        p.company_id,
+        p.branch_id,
+        p.business_unit_id,
         c.name AS category_name,
         COALESCE(stock.total_quantity, 0) AS quantity,
         COALESCE(stock.total_reserved_quantity, 0) AS reserved_quantity,
@@ -299,13 +388,21 @@ export const getProducts = async (req, res) => {
         COALESCE(stock.total_value, 0) AS stock_value,
         ${stockStatusSql} AS status
       FROM products p
-      LEFT JOIN categories c ON p.category_id = c.id
-      LEFT JOIN warehouses pw ON p.preferred_warehouse_id = pw.id
+      LEFT JOIN categories c
+        ON p.category_id = c.id
+       AND c.company_id = p.company_id
+       AND (c.branch_id <=> p.branch_id)
+       AND (c.business_unit_id <=> p.business_unit_id)
+      LEFT JOIN warehouses pw
+        ON p.preferred_warehouse_id = pw.id
+       AND pw.company_id = p.company_id
+       AND (pw.branch_id <=> p.branch_id)
+       AND (pw.business_unit_id <=> p.business_unit_id)
       ${getProductStockSummaryQuery()}
-      WHERE 1 = 1
+      WHERE 1 = 1 ${productScope.sql}
     `;
 
-    const values = [];
+    const values = [...productScope.values];
 
     if (search) {
       sql += `
@@ -357,7 +454,7 @@ export const getProducts = async (req, res) => {
     res.json(rows);
   } catch (error) {
     console.error('Get products error:', error);
-    res.status(500).json({ message: 'Failed to fetch products' });
+    res.status(error.statusCode || 500).json({ message: error.message || 'Failed to fetch products' });
   }
 };
 
@@ -367,8 +464,10 @@ export const createProduct = async (req, res) => {
   try {
     await connection.beginTransaction();
 
+    const scope = requireDataScope(req);
+    const scopeInsert = mapScopeInsert(scope);
     const payload = mapRequestToProductPayload(req);
-    const errors = await validateProductPayload({ payload });
+    const errors = await validateProductPayload({ payload, scope });
 
     if (errors.length > 0) {
       await connection.rollback();
@@ -412,10 +511,13 @@ export const createProduct = async (req, res) => {
         is_expiry_tracked,
         picking_strategy,
         is_lot_tracked,
-        is_serial_tracked
+        is_serial_tracked,
+        company_id,
+        branch_id,
+        business_unit_id
       )
       VALUES
-      (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, 0, 'Out of Stock', ?, ?, ?, ?, ?, ?)
+      (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, 0, 'Out of Stock', ?, ?, ?, ?, ?, ?, ?, ?, ?)
       `,
       [
         payload.name,
@@ -449,6 +551,9 @@ export const createProduct = async (req, res) => {
         payload.picking_strategy,
         payload.is_lot_tracked ? 1 : 0,
         payload.is_serial_tracked ? 1 : 0,
+        scopeInsert.company_id,
+        scopeInsert.branch_id,
+        scopeInsert.business_unit_id,
       ]
     );
 
@@ -457,7 +562,7 @@ export const createProduct = async (req, res) => {
 
     await connection.commit();
 
-    const createdProduct = await getProductById(result.insertId);
+    const createdProduct = await getProductById(result.insertId, scope);
 
     await createAuditLog({
       userId: req.user?.id || null,
@@ -489,22 +594,20 @@ export const createProduct = async (req, res) => {
 
 export const updateProduct = async (req, res) => {
   try {
+    const scope = requireDataScope(req);
     const { id } = req.params;
 
-    const [existingRows] = await db.query(
-      'SELECT * FROM products WHERE id = ?',
-      [id]
-    );
+    const oldProduct = await getProductById(id, scope);
 
-    if (existingRows.length === 0) {
+    if (!oldProduct) {
       return res.status(404).json({ message: 'Product not found' });
     }
 
-    const oldProduct = existingRows[0];
     const payload = mapRequestToProductPayload(req);
     const errors = await validateProductPayload({
       productId: id,
       payload,
+      scope,
     });
 
     if (errors.length > 0) {
@@ -548,6 +651,9 @@ export const updateProduct = async (req, res) => {
         is_lot_tracked = ?,
         is_serial_tracked = ?
       WHERE id = ?
+        AND company_id = ?
+        AND (? IS NULL OR branch_id <=> ?)
+        AND (? IS NULL OR business_unit_id <=> ?)
       `,
       [
         payload.name,
@@ -582,10 +688,15 @@ export const updateProduct = async (req, res) => {
         payload.is_lot_tracked ? 1 : 0,
         payload.is_serial_tracked ? 1 : 0,
         id,
+        scope.company_id,
+        scope.branch_id,
+        scope.branch_id,
+        scope.business_unit_id,
+        scope.business_unit_id,
       ]
     );
 
-    const updatedProduct = await getProductById(id);
+    const updatedProduct = await getProductById(id, scope);
 
     await createAuditLog({
       userId: req.user?.id || null,
@@ -615,23 +726,32 @@ export const updateProduct = async (req, res) => {
 
 export const deleteProduct = async (req, res) => {
   try {
+    const scope = requireDataScope(req);
     const { id } = req.params;
 
-    const [rows] = await db.query('SELECT * FROM products WHERE id = ?', [id]);
+    const product = await getProductById(id, scope);
 
-    if (rows.length === 0) {
+    if (!product) {
       return res.status(404).json({ message: 'Product not found' });
     }
-
-    const product = rows[0];
 
     const [[stockRow]] = await db.query(
       `
       SELECT COALESCE(SUM(quantity), 0) AS total_quantity
       FROM inventory_stocks
       WHERE product_id = ?
+        AND company_id = ?
+        AND (? IS NULL OR branch_id <=> ?)
+        AND (? IS NULL OR business_unit_id <=> ?)
       `,
-      [id]
+      [
+        id,
+        scope.company_id,
+        scope.branch_id,
+        scope.branch_id,
+        scope.business_unit_id,
+        scope.business_unit_id,
+      ]
     );
 
     if (Number(stockRow.total_quantity || 0) > 0) {
@@ -640,8 +760,40 @@ export const deleteProduct = async (req, res) => {
       });
     }
 
-    await db.query('DELETE FROM inventory_stocks WHERE product_id = ?', [id]);
-    await db.query('DELETE FROM products WHERE id = ?', [id]);
+    await db.query(
+      `
+      DELETE FROM inventory_stocks
+      WHERE product_id = ?
+        AND company_id = ?
+        AND (? IS NULL OR branch_id <=> ?)
+        AND (? IS NULL OR business_unit_id <=> ?)
+      `,
+      [
+        id,
+        scope.company_id,
+        scope.branch_id,
+        scope.branch_id,
+        scope.business_unit_id,
+        scope.business_unit_id,
+      ]
+    );
+    await db.query(
+      `
+      DELETE FROM products
+      WHERE id = ?
+        AND company_id = ?
+        AND (? IS NULL OR branch_id <=> ?)
+        AND (? IS NULL OR business_unit_id <=> ?)
+      `,
+      [
+        id,
+        scope.company_id,
+        scope.branch_id,
+        scope.branch_id,
+        scope.business_unit_id,
+        scope.business_unit_id,
+      ]
+    );
 
     await createAuditLog({
       userId: req.user?.id || null,

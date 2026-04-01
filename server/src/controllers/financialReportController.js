@@ -1,4 +1,5 @@
 import db from '../config/db.js';
+import { buildScopeWhereClause, requireDataScope } from '../middleware/dataScopeMiddleware.js';
 
 const round2 = (value) => Number(Number(value || 0).toFixed(2));
 
@@ -57,37 +58,38 @@ const buildDebitCreditColumns = (signedAmount) => {
   };
 };
 
-export const getFinancialReportMeta = async (_req, res) => {
+export const getFinancialReportMeta = async (req, res) => {
   try {
+    const scope = requireDataScope(req);
     const [accounts] = await db.query(`
       SELECT
         id,
         account_code,
         account_name,
         account_type
-      FROM chart_of_accounts
-      WHERE is_active = 1
+      FROM chart_of_accounts coa
+      WHERE coa.is_active = 1 ${buildScopeWhereClause(scope, { company: 'coa.company_id', branch: 'coa.branch_id', businessUnit: 'coa.business_unit_id' }).sql} ${buildScopeWhereClause(scope, { company: 'coa.company_id', branch: 'coa.branch_id', businessUnit: 'coa.business_unit_id' }).sql}
       ORDER BY account_code ASC
-    `);
+    `, buildScopeWhereClause(scope, { company: 'coa.company_id', branch: 'coa.branch_id', businessUnit: 'coa.business_unit_id' }).values);
 
     const [customers] = await db.query(`
       SELECT
         id,
         customer_code,
         name
-      FROM customers
-      WHERE status = 'Active'
+      FROM customers c
+      WHERE c.status = 'Active' ${buildScopeWhereClause(scope, { company: 'c.company_id', branch: 'c.branch_id', businessUnit: 'c.business_unit_id' }).sql}
       ORDER BY name ASC
-    `);
+    `, buildScopeWhereClause(scope, { company: 'c.company_id', branch: 'c.branch_id', businessUnit: 'c.business_unit_id' }).values);
 
     const [suppliers] = await db.query(`
       SELECT
         id,
         name
-      FROM suppliers
-      WHERE status = 'Active'
+      FROM suppliers s
+      WHERE s.status = 'Active' ${buildScopeWhereClause(scope, { company: 's.company_id', branch: 's.branch_id', businessUnit: 's.business_unit_id' }).sql}
       ORDER BY name ASC
-    `);
+    `, buildScopeWhereClause(scope, { company: 's.company_id', branch: 's.branch_id', businessUnit: 's.business_unit_id' }).values);
 
     res.json({
       accounts,
@@ -102,6 +104,7 @@ export const getFinancialReportMeta = async (_req, res) => {
 
 export const getTrialBalance = async (req, res) => {
   try {
+    const scope = requireDataScope(req);
     const {
       date_from = '',
       date_to = '',
@@ -156,7 +159,7 @@ export const getTrialBalance = async (req, res) => {
         INNER JOIN journal_entries je
           ON je.id = jel.journal_entry_id
         WHERE je.status = 'Posted'
-          AND je.entry_date < ?
+          AND je.entry_date < ? ${buildScopeWhereClause(scope, { company: 'je.company_id', branch: 'je.branch_id', businessUnit: 'je.business_unit_id' }).sql} ${buildScopeWhereClause(scope, { company: 'je.company_id', branch: 'je.branch_id', businessUnit: 'je.business_unit_id' }).sql}
         GROUP BY jel.account_id
       ) opening
         ON opening.account_id = coa.id
@@ -170,7 +173,7 @@ export const getTrialBalance = async (req, res) => {
         INNER JOIN journal_entries je
           ON je.id = jel.journal_entry_id
         WHERE je.status = 'Posted'
-          AND je.entry_date BETWEEN ? AND ?
+          AND je.entry_date BETWEEN ? AND ? ${buildScopeWhereClause(scope, { company: 'je.company_id', branch: 'je.branch_id', businessUnit: 'je.business_unit_id' }).sql} ${buildScopeWhereClause(scope, { company: 'je.company_id', branch: 'je.branch_id', businessUnit: 'je.business_unit_id' }).sql}
         GROUP BY jel.account_id
       ) period
         ON period.account_id = coa.id
@@ -180,7 +183,9 @@ export const getTrialBalance = async (req, res) => {
       ORDER BY coa.account_code ASC
     `;
 
-    const values = [date_from, date_from, date_to, ...accountFilterValues];
+    const jeScope = buildScopeWhereClause(scope, { company: 'je.company_id', branch: 'je.branch_id', businessUnit: 'je.business_unit_id' });
+    const coaScope = buildScopeWhereClause(scope, { company: 'coa.company_id', branch: 'coa.branch_id', businessUnit: 'coa.business_unit_id' });
+    const values = [date_from, ...jeScope.values, date_from, date_to, ...jeScope.values, ...coaScope.values, ...accountFilterValues];
 
     const [rows] = await db.query(sql, values);
 
@@ -262,6 +267,7 @@ export const getTrialBalance = async (req, res) => {
 
 export const getGeneralLedger = async (req, res) => {
   try {
+    const scope = requireDataScope(req);
     const {
       account_id = '',
       date_from = '',
@@ -286,10 +292,10 @@ export const getGeneralLedger = async (req, res) => {
         account_name,
         account_type
       FROM chart_of_accounts
-      WHERE id = ?
+      WHERE id = ? ${buildScopeWhereClause(scope, { company: 'chart_of_accounts.company_id', branch: 'chart_of_accounts.branch_id', businessUnit: 'chart_of_accounts.business_unit_id' }).sql}
       LIMIT 1
       `,
-      [Number(account_id)]
+      [Number(account_id), ...buildScopeWhereClause(scope, { company: 'chart_of_accounts.company_id', branch: 'chart_of_accounts.branch_id', businessUnit: 'chart_of_accounts.business_unit_id' }).values]
     );
 
     if (!account) {
@@ -308,7 +314,7 @@ export const getGeneralLedger = async (req, res) => {
         AND jel.account_id = ?
         AND je.entry_date < ?
       `,
-      [Number(account_id), date_from]
+      [Number(account_id), date_from, ...buildScopeWhereClause(scope, { company: 'je.company_id', branch: 'je.branch_id', businessUnit: 'je.business_unit_id' }).values]
     );
 
     const [rows] = await db.query(
@@ -332,7 +338,7 @@ export const getGeneralLedger = async (req, res) => {
         AND je.entry_date BETWEEN ? AND ?
       ORDER BY je.entry_date ASC, je.id ASC, jel.id ASC
       `,
-      [Number(account_id), date_from, date_to]
+      [Number(account_id), date_from, date_to, ...buildScopeWhereClause(scope, { company: 'je.company_id', branch: 'je.branch_id', businessUnit: 'je.business_unit_id' }).values]
     );
 
     const openingSigned = buildNaturalBalance(
@@ -390,6 +396,7 @@ export const getGeneralLedger = async (req, res) => {
 
 export const getBalanceSheet = async (req, res) => {
   try {
+    const scope = requireDataScope(req);
     const { as_of_date = today() } = req.query;
 
     const [rows] = await db.query(
@@ -410,6 +417,8 @@ export const getBalanceSheet = async (req, res) => {
         AND je.entry_date <= ?
       WHERE coa.is_active = 1
         AND coa.account_type IN ('Asset', 'Liability', 'Equity')
+        ${buildScopeWhereClause(scope, { company: 'coa.company_id', branch: 'coa.branch_id', businessUnit: 'coa.business_unit_id' }).sql}
+        ${buildScopeWhereClause(scope, { company: 'je.company_id', branch: 'je.branch_id', businessUnit: 'je.business_unit_id' }).sql}
       GROUP BY
         coa.id,
         coa.account_code,
@@ -417,7 +426,7 @@ export const getBalanceSheet = async (req, res) => {
         coa.account_type
       ORDER BY coa.account_code ASC
       `,
-      [as_of_date]
+      [as_of_date, ...buildScopeWhereClause(scope, { company: 'coa.company_id', branch: 'coa.branch_id', businessUnit: 'coa.business_unit_id' }).values, ...buildScopeWhereClause(scope, { company: 'je.company_id', branch: 'je.branch_id', businessUnit: 'je.business_unit_id' }).values]
     );
 
     const assets = [];
@@ -479,6 +488,7 @@ export const getBalanceSheet = async (req, res) => {
 
 export const getProfitAndLoss = async (req, res) => {
   try {
+    const scope = requireDataScope(req);
     const {
       date_from = '',
       date_to = '',
@@ -508,6 +518,8 @@ export const getProfitAndLoss = async (req, res) => {
         AND je.entry_date BETWEEN ? AND ?
       WHERE coa.is_active = 1
         AND coa.account_type IN ('Revenue', 'Expense')
+        ${buildScopeWhereClause(scope, { company: 'coa.company_id', branch: 'coa.branch_id', businessUnit: 'coa.business_unit_id' }).sql}
+        ${buildScopeWhereClause(scope, { company: 'je.company_id', branch: 'je.branch_id', businessUnit: 'je.business_unit_id' }).sql}
       GROUP BY
         coa.id,
         coa.account_code,
@@ -515,7 +527,7 @@ export const getProfitAndLoss = async (req, res) => {
         coa.account_type
       ORDER BY coa.account_code ASC
       `,
-      [date_from, date_to]
+      [date_from, date_to, ...buildScopeWhereClause(scope, { company: 'coa.company_id', branch: 'coa.branch_id', businessUnit: 'coa.business_unit_id' }).values, ...buildScopeWhereClause(scope, { company: 'je.company_id', branch: 'je.branch_id', businessUnit: 'je.business_unit_id' }).values]
     );
 
     const revenues = [];
@@ -571,6 +583,7 @@ export const getProfitAndLoss = async (req, res) => {
 
 export const getArAgingReport = async (req, res) => {
   try {
+    const scope = requireDataScope(req);
     const {
       customer_id = '',
       as_of_date = today(),
@@ -607,10 +620,10 @@ export const getArAgingReport = async (req, res) => {
       INNER JOIN customers c
         ON c.id = si.customer_id
       WHERE si.status IN ('Posted', 'Partially Paid', 'Paid')
-        AND si.invoice_date <= ?
+        AND si.invoice_date <= ? ${buildScopeWhereClause(scope, { company: 'si.company_id', branch: 'si.branch_id', businessUnit: 'si.business_unit_id' }).sql}
     `;
 
-    const values = [as_of_date, as_of_date, as_of_date];
+    const values = [as_of_date, as_of_date, as_of_date, ...buildScopeWhereClause(scope, { company: 'si.company_id', branch: 'si.branch_id', businessUnit: 'si.business_unit_id' }).values];
 
     if (customer_id) {
       sql += ` AND si.customer_id = ?`;
@@ -739,6 +752,7 @@ export const getArAgingReport = async (req, res) => {
 
 export const getApAgingReport = async (req, res) => {
   try {
+    const scope = requireDataScope(req);
     const {
       supplier_id = '',
       as_of_date = today(),
@@ -768,10 +782,10 @@ export const getApAgingReport = async (req, res) => {
       INNER JOIN suppliers s
         ON s.id = ai.supplier_id
       WHERE ai.status IN ('Posted', 'Paid')
-        AND ai.invoice_date <= ?
+        AND ai.invoice_date <= ? ${buildScopeWhereClause(scope, { company: 'ai.company_id', branch: 'ai.branch_id', businessUnit: 'ai.business_unit_id' }).sql}
     `;
 
-    const values = [as_of_date, as_of_date];
+    const values = [as_of_date, as_of_date, ...buildScopeWhereClause(scope, { company: 'ai.company_id', branch: 'ai.branch_id', businessUnit: 'ai.business_unit_id' }).values];
 
     if (supplier_id) {
       sql += ` AND ai.supplier_id = ?`;

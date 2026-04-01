@@ -1,5 +1,6 @@
 import db from '../config/db.js';
 import { withTransaction } from '../utils/dbTransaction.js';
+import { requireDataScope } from '../middleware/dataScopeMiddleware.js';
 import {
   createStockTransferService,
   approveStockTransferService,
@@ -11,7 +12,7 @@ import {
 
 export const getStockTransfers = async (req, res) => {
   try {
-    const rows = await getStockTransfersService(req.query);
+    const rows = await getStockTransfersService(req.query, requireDataScope(req));
     res.json(rows);
   } catch (error) {
     console.error('Get stock transfers error:', error);
@@ -21,7 +22,7 @@ export const getStockTransfers = async (req, res) => {
 
 export const getStockTransferById = async (req, res) => {
   try {
-    const row = await getStockTransferByIdService(Number(req.params.id));
+    const row = await getStockTransferByIdService(Number(req.params.id), requireDataScope(req));
 
     if (!row) {
       return res.status(404).json({ message: 'Stock transfer not found' });
@@ -37,7 +38,7 @@ export const getStockTransferById = async (req, res) => {
 export const createStockTransfer = async (req, res) => {
   try {
     const result = await withTransaction(async (connection) => {
-      return createStockTransferService(connection, req.body, req.user?.id);
+      return createStockTransferService(connection, req.body, req.user?.id, requireDataScope(req));
     });
 
     res.status(201).json(result);
@@ -50,7 +51,7 @@ export const createStockTransfer = async (req, res) => {
 export const approveStockTransfer = async (req, res) => {
   try {
     const result = await withTransaction(async (connection) => {
-      return approveStockTransferService(connection, Number(req.params.id), req.user?.id);
+      return approveStockTransferService(connection, Number(req.params.id), req.user?.id, requireDataScope(req));
     });
 
     res.json(result);
@@ -63,7 +64,7 @@ export const approveStockTransfer = async (req, res) => {
 export const postTransfer = async (req, res) => {
   try {
     const result = await withTransaction(async (connection) => {
-      return postStockTransferService(connection, Number(req.params.id), req.user?.id);
+      return postStockTransferService(connection, Number(req.params.id), req.user?.id, requireDataScope(req));
     });
 
     res.json(result);
@@ -80,7 +81,8 @@ export const cancelStockTransfer = async (req, res) => {
         connection,
         Number(req.params.id),
         req.user?.id,
-        req.body?.cancellation_reason || null
+        req.body?.cancellation_reason || null,
+        requireDataScope(req)
       );
     });
 

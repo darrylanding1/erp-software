@@ -4,11 +4,12 @@ import {
   authenticate,
   authorizePermissions,
 } from '../middleware/authMiddleware.js';
+import { attachDataScope } from '../middleware/dataScopeMiddleware.js';
 
 const router = express.Router();
 
 router.use(authenticate);
 
-router.get('/', authorizePermissions('inventory.ledger.view'), getInventoryLedger);
+router.get('/', authorizePermissions('inventory.ledger.view'), attachDataScope, getInventoryLedger);
 
 export default router;

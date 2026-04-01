@@ -1,4 +1,5 @@
 import { withTransaction } from '../utils/dbTransaction.js';
+import { requireDataScope } from '../middleware/dataScopeMiddleware.js';
 import {
   getInventoryAdjustmentsService,
   getInventoryAdjustmentByIdService,
@@ -10,7 +11,7 @@ import {
 
 export const getInventoryAdjustments = async (req, res) => {
   try {
-    const rows = await getInventoryAdjustmentsService(req.query);
+    const rows = await getInventoryAdjustmentsService(req.query, requireDataScope(req));
     res.json(rows);
   } catch (error) {
     console.error('Get inventory adjustments error:', error);
@@ -20,7 +21,7 @@ export const getInventoryAdjustments = async (req, res) => {
 
 export const getInventoryAdjustmentById = async (req, res) => {
   try {
-    const row = await getInventoryAdjustmentByIdService(Number(req.params.id));
+    const row = await getInventoryAdjustmentByIdService(Number(req.params.id), requireDataScope(req));
 
     if (!row) {
       return res.status(404).json({ message: 'Inventory adjustment not found' });
@@ -36,7 +37,7 @@ export const getInventoryAdjustmentById = async (req, res) => {
 export const createInventoryAdjustment = async (req, res) => {
   try {
     const result = await withTransaction(async (connection) => {
-      return createInventoryAdjustmentService(connection, req.body, req.user?.id);
+      return createInventoryAdjustmentService(connection, req.body, req.user?.id, requireDataScope(req));
     });
 
     res.status(201).json(result);
@@ -49,7 +50,7 @@ export const createInventoryAdjustment = async (req, res) => {
 export const approveInventoryAdjustment = async (req, res) => {
   try {
     const result = await withTransaction(async (connection) => {
-      return approveInventoryAdjustmentService(connection, Number(req.params.id), req.user?.id);
+      return approveInventoryAdjustmentService(connection, Number(req.params.id), req.user?.id, requireDataScope(req));
     });
 
     res.json(result);
@@ -66,7 +67,8 @@ export const rejectInventoryAdjustment = async (req, res) => {
         connection,
         Number(req.params.id),
         req.user?.id,
-        req.body?.rejection_reason || null
+        req.body?.rejection_reason || null,
+        requireDataScope(req)
       );
     });
 
@@ -80,7 +82,7 @@ export const rejectInventoryAdjustment = async (req, res) => {
 export const postInventoryAdjustment = async (req, res) => {
   try {
     const result = await withTransaction(async (connection) => {
-      return postInventoryAdjustmentService(connection, Number(req.params.id), req.user?.id);
+      return postInventoryAdjustmentService(connection, Number(req.params.id), req.user?.id, requireDataScope(req));
     });
 
     res.json(result);

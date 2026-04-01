@@ -1,10 +1,23 @@
 import db from '../config/db.js';
+import {
+  assertScopeMatch,
+  buildScopeWhereClause,
+  requireDataScope,
+} from '../middleware/dataScopeMiddleware.js';
 
 const round2 = (value) => Number(Number(value || 0).toFixed(2));
 
+const mapScopeInsert = (scope) => ({
+  company_id: scope.company_id,
+  branch_id: scope.branch_id,
+  business_unit_id: scope.business_unit_id,
+});
+
 export const getChartOfAccounts = async (req, res) => {
   try {
+    const scope = requireDataScope(req);
     const { search = '', account_type = '', is_active = '' } = req.query;
+    const scopeFilter = buildScopeWhereClause(scope);
 
     let sql = `
       SELECT
@@ -16,9 +29,9 @@ export const getChartOfAccounts = async (req, res) => {
         created_at,
         updated_at
       FROM chart_of_accounts
-      WHERE 1 = 1
+      WHERE 1 = 1 ${scopeFilter.sql}
     `;
-    const values = [];
+    const values = [...scopeFilter.values];
 
     if (search) {
       sql += ` AND (account_code LIKE ? OR account_name LIKE ?)`;
@@ -47,6 +60,7 @@ export const getChartOfAccounts = async (req, res) => {
 
 export const createAccount = async (req, res) => {
   try {
+    const scope = requireDataScope(req);
     const {
       account_code,
       account_name,
@@ -60,6 +74,7 @@ export const createAccount = async (req, res) => {
       });
     }
 
+    const insertScope = mapScopeInsert(scope);
     const [result] = await db.query(
       `
       INSERT INTO chart_of_accounts
@@ -67,15 +82,21 @@ export const createAccount = async (req, res) => {
         account_code,
         account_name,
         account_type,
-        is_active
+        is_active,
+        company_id,
+        branch_id,
+        business_unit_id
       )
-      VALUES (?, ?, ?, ?)
+      VALUES (?, ?, ?, ?, ?, ?, ?)
       `,
       [
         account_code.trim(),
         account_name.trim(),
         account_type,
         Number(is_active) ? 1 : 0,
+        insertScope.company_id,
+        insertScope.branch_id,
+        insertScope.business_unit_id,
       ]
     );
 
@@ -111,6 +132,7 @@ export const createAccount = async (req, res) => {
 
 export const updateAccount = async (req, res) => {
   try {
+    const scope = requireDataScope(req);
     const { id } = req.params;
     const {
       account_code,
@@ -133,7 +155,7 @@ export const updateAccount = async (req, res) => {
 
     const [[existing]] = await db.query(
       `
-      SELECT id
+      SELECT id, company_id, branch_id, business_unit_id
       FROM chart_of_accounts
       WHERE id = ?
       `,
@@ -143,6 +165,8 @@ export const updateAccount = async (req, res) => {
     if (!existing) {
       return res.status(404).json({ message: 'Account not found' });
     }
+
+    assertScopeMatch(existing, scope);
 
     await db.query(
       `
@@ -195,6 +219,7 @@ export const updateAccount = async (req, res) => {
 
 export const deleteAccount = async (req, res) => {
   try {
+    const scope = requireDataScope(req);
     const { id } = req.params;
     const accountId = Number(id);
 
@@ -202,14 +227,34 @@ export const deleteAccount = async (req, res) => {
       return res.status(400).json({ message: 'Invalid account id' });
     }
 
-    const [[lineRow]] = await db.query(
+    const [[accountRow]] = await db.query(
       `
-      SELECT id
-      FROM journal_entry_lines
-      WHERE account_id = ?
+      SELECT id, company_id, branch_id, business_unit_id
+      FROM chart_of_accounts
+      WHERE id = ?
       LIMIT 1
       `,
       [accountId]
+    );
+
+    if (!accountRow) {
+      return res.status(404).json({ message: 'Account not found' });
+    }
+
+    assertScopeMatch(accountRow, scope);
+
+    const [[lineRow]] = await db.query(
+      `
+      SELECT jel.id
+      FROM journal_entry_lines jel
+      INNER JOIN chart_of_accounts coa ON coa.id = jel.account_id
+      WHERE jel.account_id = ?
+        AND coa.company_id = ?
+        AND coa.branch_id <=> ?
+        AND coa.business_unit_id <=> ?
+      LIMIT 1
+      `,
+      [accountId, scope.company_id, scope.branch_id, scope.business_unit_id]
     );
 
     if (lineRow) {
@@ -240,6 +285,7 @@ export const deleteAccount = async (req, res) => {
 
 export const getGeneralLedger = async (req, res) => {
   try {
+    const scope = requireDataScope(req);
     const {
       date_from = '',
       date_to = '',
@@ -262,9 +308,9 @@ export const getGeneralLedger = async (req, res) => {
         je.status,
         je.created_at
       FROM journal_entries je
-      WHERE 1 = 1
+      WHERE 1 = 1 ${scopeFilter.sql}
     `;
-    const values = [];
+    const values = [...scopeFilter.values];
 
     if (date_from) {
       sql += ` AND je.entry_date >= ?`;
@@ -362,6 +408,7 @@ export const getGeneralLedger = async (req, res) => {
 
 export const getTrialBalance = async (req, res) => {
   try {
+    const scope = requireDataScope(req);
     const { date_from = '', date_to = '', account_type = '', is_active = '' } = req.query;
 
     let sql = `
@@ -380,8 +427,8 @@ export const getTrialBalance = async (req, res) => {
         ON jel.journal_entry_id = je.id
         AND je.status = 'Posted'
     `;
-    const conditions = ['1 = 1'];
-    const values = [];
+    const conditions = ['coa.company_id = ?', 'coa.branch_id <=> ?', 'coa.business_unit_id <=> ?'];
+    const values = [scope.company_id, scope.branch_id, scope.business_unit_id];
 
     if (date_from) {
       conditions.push(`(je.entry_date >= ? OR je.entry_date IS NULL)`);

@@ -10,15 +10,26 @@ import {
   authenticate,
   authorizePermissions,
 } from '../middleware/authMiddleware.js';
+import { attachDataScope } from '../middleware/dataScopeMiddleware.js';
 
 const router = express.Router();
 
 router.use(authenticate);
 
-router.get('/meta', authorizePermissions('reservations.view'), getReservationMeta);
-router.get('/', authorizePermissions('reservations.view'), getReservations);
-router.post('/', authorizePermissions('reservations.manage'), createReservation);
-router.post('/:id/release', authorizePermissions('reservations.manage'), releaseReservation);
-router.post('/:id/issue', authorizePermissions('reservations.manage'), issueReservation);
+router.get('/meta', authorizePermissions('reservations.view'), attachDataScope, getReservationMeta);
+router.get('/', authorizePermissions('reservations.view'), attachDataScope, getReservations);
+router.post('/', authorizePermissions('reservations.manage'), attachDataScope, createReservation);
+router.post(
+  '/:id/release',
+  authorizePermissions('reservations.manage'),
+  attachDataScope,
+  releaseReservation
+);
+router.post(
+  '/:id/issue',
+  authorizePermissions('reservations.manage'),
+  attachDataScope,
+  issueReservation
+);
 
 export default router;

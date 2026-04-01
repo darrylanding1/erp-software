@@ -2,6 +2,7 @@ import db from '../config/db.js';
 import {
   applyDataScopeFilter,
   assertScopeMatch,
+  requireDataScope,
 } from '../middleware/dataScopeMiddleware.js';
 
 const mapScopeInsert = (scope) => ({
@@ -12,6 +13,7 @@ const mapScopeInsert = (scope) => ({
 
 export const getCustomers = async (req, res) => {
   try {
+    const scope = requireDataScope(req);
     const { search = '' } = req.query;
 
     let query = applyDataScopeFilter({
@@ -33,7 +35,7 @@ export const getCustomers = async (req, res) => {
         FROM customers
         WHERE 1 = 1
       `,
-      scope: req.dataScope,
+      scope,
     });
 
     if (search) {
@@ -67,6 +69,7 @@ export const getCustomers = async (req, res) => {
 
 export const getCustomerById = async (req, res) => {
   try {
+    const scope = requireDataScope(req);
     const customerId = Number(req.params.id);
 
     if (!customerId) {
@@ -100,7 +103,7 @@ export const getCustomerById = async (req, res) => {
       return res.status(404).json({ message: 'Customer not found' });
     }
 
-    assertScopeMatch(row, req.dataScope);
+    assertScopeMatch(row, scope);
     res.json(row);
   } catch (error) {
     console.error('Get customer by id error:', error);
@@ -131,7 +134,7 @@ export const createCustomer = async (req, res) => {
       });
     }
 
-    const scope = mapScopeInsert(req.dataScope);
+    const scope = mapScopeInsert(requireDataScope(req));
 
     const [result] = await db.query(
       `
@@ -201,6 +204,7 @@ export const createCustomer = async (req, res) => {
 
 export const updateCustomer = async (req, res) => {
   try {
+    const scope = requireDataScope(req);
     const customerId = Number(req.params.id);
 
     if (!customerId) {
@@ -237,7 +241,7 @@ export const updateCustomer = async (req, res) => {
       return res.status(404).json({ message: 'Customer not found' });
     }
 
-    assertScopeMatch(existingRow, req.dataScope);
+    assertScopeMatch(existingRow, scope);
 
     const [result] = await db.query(
       `
@@ -309,6 +313,7 @@ export const updateCustomer = async (req, res) => {
 
 export const deleteCustomer = async (req, res) => {
   try {
+    const scope = requireDataScope(req);
     const customerId = Number(req.params.id);
 
     if (!customerId) {
@@ -329,7 +334,7 @@ export const deleteCustomer = async (req, res) => {
       return res.status(404).json({ message: 'Customer not found' });
     }
 
-    assertScopeMatch(customerRow, req.dataScope);
+    assertScopeMatch(customerRow, scope);
 
     const invoiceQuery = applyDataScopeFilter({
       baseSql: `
@@ -338,7 +343,7 @@ export const deleteCustomer = async (req, res) => {
         WHERE customer_id = ?
       `,
       baseValues: [customerId],
-      scope: req.dataScope,
+      scope,
     });
 
     invoiceQuery.sql += ' LIMIT 1';

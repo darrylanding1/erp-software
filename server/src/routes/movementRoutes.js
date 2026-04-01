@@ -11,21 +11,23 @@ import {
   authenticate,
   authorizePermissions,
 } from '../middleware/authMiddleware.js';
+import { attachDataScope } from '../middleware/dataScopeMiddleware.js';
 
 const router = express.Router();
 
 router.use(authenticate);
 
-router.get('/meta', authorizePermissions('inventory.view'), getMovementMeta);
+router.get('/meta', authorizePermissions('inventory.view'), attachDataScope, getMovementMeta);
 router.get(
   '/stock-overview',
   authorizePermissions('inventory.view'),
+  attachDataScope,
   getStockOverview
 );
-router.get('/transfers', authorizePermissions('inventory.view'), getTransfers);
-router.post('/transfers', authorizePermissions('inventory.transfer'), createTransfer);
+router.get('/transfers', authorizePermissions('inventory.view'), attachDataScope, getTransfers);
+router.post('/transfers', authorizePermissions('inventory.transfer'), attachDataScope, createTransfer);
 
-router.get('/', authorizePermissions('inventory.view'), getMovements);
-router.post('/', authorizePermissions('inventory.adjust'), createMovement);
+router.get('/', authorizePermissions('inventory.view'), attachDataScope, getMovements);
+router.post('/', authorizePermissions('inventory.adjust'), attachDataScope, createMovement);
 
 export default router;

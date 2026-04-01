@@ -1,4 +1,50 @@
 import db from '../config/db.js';
+import { buildScopeWhereClause, requireDataScope } from '../middleware/dataScopeMiddleware.js';
+
+
+const buildWarehouseScope = (scope, alias = 'w') =>
+  buildScopeWhereClause(scope, {
+    company: `${alias}.company_id`,
+    branch: `${alias}.branch_id`,
+    businessUnit: `${alias}.business_unit_id`,
+  });
+
+const buildPurchaseOrderScope = (scope, alias = 'po') =>
+  buildScopeWhereClause(scope, {
+    company: `${alias}.company_id`,
+    branch: `${alias}.branch_id`,
+    businessUnit: `${alias}.business_unit_id`,
+  });
+
+const buildGoodsReceiptScope = (scope, alias = 'gr') =>
+  buildScopeWhereClause(scope, {
+    company: `${alias}.company_id`,
+    branch: `${alias}.branch_id`,
+    businessUnit: `${alias}.business_unit_id`,
+  });
+
+const assertWarehouseInScope = async (connection, warehouseId, scope) => {
+  const warehouseScope = buildWarehouseScope(scope, 'w');
+  const [warehouseRows] = await connection.query(
+    `
+    SELECT id, name, code, status
+    FROM warehouses w
+    WHERE w.id = ? ${warehouseScope.sql}
+    LIMIT 1
+    `,
+    [Number(warehouseId), ...warehouseScope.values]
+  );
+
+  if (!warehouseRows.length) {
+    throw new Error('Warehouse not found in the active scope');
+  }
+
+  if (warehouseRows[0].status !== 'Active') {
+    throw new Error('Inactive warehouse cannot receive stock');
+  }
+
+  return warehouseRows[0];
+};
 
 const getStockStatus = (quantity) => {
   const qty = Number(quantity) || 0;
@@ -183,13 +229,18 @@ const insertInventoryLedgerEntry = async ({
 
 export const getGoodsReceiptMeta = async (req, res) => {
   try {
+    const scope = requireDataScope(req);
+    const warehouseScope = buildWarehouseScope(scope, 'w');
+    const purchaseOrderScope = buildPurchaseOrderScope(scope, 'po');
+
     const [warehouses] = await db.query(
       `
       SELECT id, name, code, address, status
-      FROM warehouses
-      WHERE status = 'Active'
-      ORDER BY name ASC
-      `
+      FROM warehouses w
+      WHERE w.status = 'Active' ${warehouseScope.sql}
+      ORDER BY w.name ASC
+      `,
+      warehouseScope.values
     );
 
     const [purchaseOrders] = await db.query(
@@ -209,6 +260,7 @@ export const getGoodsReceiptMeta = async (req, res) => {
       INNER JOIN suppliers s ON po.supplier_id = s.id
       INNER JOIN purchase_order_items poi ON poi.purchase_order_id = po.id
       WHERE po.status IN ('Pending', 'Partial')
+        ${purchaseOrderScope.sql}
       GROUP BY
         po.id,
         po.po_number,
@@ -221,7 +273,8 @@ export const getGoodsReceiptMeta = async (req, res) => {
         s.name
       HAVING open_quantity > 0
       ORDER BY po.order_date DESC, po.id DESC
-      `
+      `,
+      purchaseOrderScope.values
     );
 
     res.json({
@@ -230,12 +283,13 @@ export const getGoodsReceiptMeta = async (req, res) => {
     });
   } catch (error) {
     console.error('Get goods receipt meta error:', error);
-    res.status(500).json({ message: 'Failed to fetch goods receipt metadata' });
+    res.status(error.statusCode || 500).json({ message: error.message || 'Failed to fetch goods receipt metadata' });
   }
 };
 
 export const getGoodsReceiptSuggestions = async (req, res) => {
   try {
+    const scope = requireDataScope(req);
     const { purchase_order_id, warehouse_id = '' } = req.query;
 
     if (!purchase_order_id) {
@@ -255,10 +309,10 @@ export const getGoodsReceiptSuggestions = async (req, res) => {
         s.name AS supplier_name
       FROM purchase_orders po
       INNER JOIN suppliers s ON s.id = po.supplier_id
-      WHERE po.id = ?
+      WHERE po.id = ? ${buildPurchaseOrderScope(scope, 'po').sql}
       LIMIT 1
       `,
-      [purchase_order_id]
+      [purchase_order_id, ...buildPurchaseOrderScope(scope, 'po').values]
     );
 
     if (poRows.length === 0) {
@@ -338,12 +392,13 @@ export const getGoodsReceiptSuggestions = async (req, res) => {
     });
   } catch (error) {
     console.error('Get goods receipt suggestions error:', error);
-    res.status(500).json({ message: 'Failed to load receiving suggestions' });
+    res.status(error.statusCode || 500).json({ message: error.message || 'Failed to load receiving suggestions' });
   }
 };
 
 export const getPurchaseOrderForReceipt = async (req, res) => {
   try {
+    const scope = requireDataScope(req);
     const { id } = req.params;
 
     const [poRows] = await db.query(
@@ -364,9 +419,9 @@ export const getPurchaseOrderForReceipt = async (req, res) => {
         s.phone
       FROM purchase_orders po
       INNER JOIN suppliers s ON po.supplier_id = s.id
-      WHERE po.id = ?
+      WHERE po.id = ? ${buildPurchaseOrderScope(scope, 'po').sql}
       `,
-      [id]
+      [id, ...buildPurchaseOrderScope(scope, 'po').values]
     );
 
     if (poRows.length === 0) {
@@ -410,12 +465,13 @@ export const getPurchaseOrderForReceipt = async (req, res) => {
     });
   } catch (error) {
     console.error('Get purchase order for receipt error:', error);
-    res.status(500).json({ message: 'Failed to fetch purchase order details' });
+    res.status(error.statusCode || 500).json({ message: error.message || 'Failed to fetch purchase order details' });
   }
 };
 
 export const getGoodsReceipts = async (req, res) => {
   try {
+    const scope = requireDataScope(req);
     const {
       search = '',
       warehouse_id = '',
@@ -437,9 +493,9 @@ export const getGoodsReceipts = async (req, res) => {
       INNER JOIN purchase_orders po ON gr.purchase_order_id = po.id
       INNER JOIN suppliers s ON po.supplier_id = s.id
       INNER JOIN warehouses w ON gr.warehouse_id = w.id
-      WHERE 1 = 1
+      WHERE 1 = 1 ${buildGoodsReceiptScope(scope, 'gr').sql}
     `;
-    const values = [];
+    const values = [...buildGoodsReceiptScope(scope, 'gr').values];
 
     if (warehouse_id) {
       sql += ` AND gr.warehouse_id = ?`;
@@ -473,12 +529,13 @@ export const getGoodsReceipts = async (req, res) => {
     res.json(rows);
   } catch (error) {
     console.error('Get goods receipts error:', error);
-    res.status(500).json({ message: 'Failed to fetch goods receipts' });
+    res.status(error.statusCode || 500).json({ message: error.message || 'Failed to fetch goods receipts' });
   }
 };
 
 export const getGoodsReceiptById = async (req, res) => {
   try {
+    const scope = requireDataScope(req);
     const { id } = req.params;
 
     const [headerRows] = await db.query(
@@ -497,9 +554,9 @@ export const getGoodsReceiptById = async (req, res) => {
       INNER JOIN purchase_orders po ON gr.purchase_order_id = po.id
       INNER JOIN suppliers s ON po.supplier_id = s.id
       INNER JOIN warehouses w ON gr.warehouse_id = w.id
-      WHERE gr.id = ?
+      WHERE gr.id = ? ${buildGoodsReceiptScope(scope, 'gr').sql}
       `,
-      [id]
+      [id, ...buildGoodsReceiptScope(scope, 'gr').values]
     );
 
     if (headerRows.length === 0) {
@@ -529,7 +586,7 @@ export const getGoodsReceiptById = async (req, res) => {
     });
   } catch (error) {
     console.error('Get goods receipt by id error:', error);
-    res.status(500).json({ message: 'Failed to fetch goods receipt details' });
+    res.status(error.statusCode || 500).json({ message: error.message || 'Failed to fetch goods receipt details' });
   }
 };
 
@@ -538,6 +595,7 @@ export const createGoodsReceipt = async (req, res) => {
 
   try {
     await connection.beginTransaction();
+    const scope = requireDataScope(req);
 
     const {
       purchase_order_id,
@@ -561,10 +619,10 @@ export const createGoodsReceipt = async (req, res) => {
       `
       SELECT *
       FROM purchase_orders
-      WHERE id = ?
+      WHERE id = ? ${buildPurchaseOrderScope(scope).sql}
       FOR UPDATE
       `,
-      [purchaseOrderId]
+      [purchaseOrderId, ...buildPurchaseOrderScope(scope).values]
     );
 
     if (poRows.length === 0) {
@@ -584,24 +642,7 @@ export const createGoodsReceipt = async (req, res) => {
       return res.status(400).json({ message: 'Purchase order is already fully received' });
     }
 
-    const [warehouseRows] = await connection.query(
-      `
-      SELECT id, name, code, status
-      FROM warehouses
-      WHERE id = ?
-      `,
-      [warehouseId]
-    );
-
-    if (warehouseRows.length === 0) {
-      await connection.rollback();
-      return res.status(404).json({ message: 'Warehouse not found' });
-    }
-
-    if (warehouseRows[0].status !== 'Active') {
-      await connection.rollback();
-      return res.status(400).json({ message: 'Inactive warehouse cannot receive stock' });
-    }
+    await assertWarehouseInScope(connection, warehouseId, scope);
 
     const [poItemRows] = await connection.query(
       `
@@ -729,9 +770,12 @@ export const createGoodsReceipt = async (req, res) => {
         remarks,
         status,
         posted_at,
-        posted_by
+        posted_by,
+        company_id,
+        branch_id,
+        business_unit_id
       )
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
       `,
       [
         grNumber,
@@ -742,6 +786,9 @@ export const createGoodsReceipt = async (req, res) => {
         initialStatus,
         auto_post ? new Date() : null,
         auto_post ? req.user?.id || null : null,
+        scope.company_id,
+        scope.branch_id,
+        scope.business_unit_id,
       ]
     );
 
@@ -819,9 +866,12 @@ export const createGoodsReceipt = async (req, res) => {
           quantity,
           previous_quantity,
           new_quantity,
-          note
+          note,
+          company_id,
+          branch_id,
+          business_unit_id
         )
-        VALUES (?, ?, 'Restock', 'Goods Receipt', ?, ?, ?, ?, ?)
+        VALUES (?, ?, 'Restock', 'Goods Receipt', ?, ?, ?, ?, ?, ?, ?, ?)
         `,
         [
           productId,
@@ -831,6 +881,9 @@ export const createGoodsReceipt = async (req, res) => {
           stockState.previousQty,
           stockState.newQty,
           `${grNumber} from PO ${purchaseOrder.po_number}`,
+          scope.company_id,
+          scope.branch_id,
+          scope.business_unit_id,
         ]
       );
 
@@ -908,7 +961,7 @@ export const createGoodsReceipt = async (req, res) => {
       INNER JOIN warehouses w ON gr.warehouse_id = w.id
       WHERE gr.id = ?
       `,
-      [goodsReceiptId]
+      [goodsReceiptId, ...buildGoodsReceiptScope(scope).values]
     );
 
     const [receiptItemRows] = await connection.query(
@@ -935,7 +988,7 @@ export const createGoodsReceipt = async (req, res) => {
   } catch (error) {
     await connection.rollback();
     console.error('Create goods receipt error:', error);
-    res.status(500).json({ message: 'Failed to create goods receipt' });
+    res.status(error.statusCode || 500).json({ message: error.message || 'Failed to create goods receipt' });
   } finally {
     connection.release();
   }
@@ -946,6 +999,7 @@ export const postGoodsReceipt = async (req, res) => {
 
   try {
     await connection.beginTransaction();
+    const scope = requireDataScope(req);
 
     const goodsReceiptId = Number(req.params.id);
 
@@ -958,7 +1012,7 @@ export const postGoodsReceipt = async (req, res) => {
       `
       SELECT *
       FROM goods_receipts
-      WHERE id = ?
+      WHERE id = ? ${buildPurchaseOrderScope(scope).sql}
       FOR UPDATE
       `,
       [goodsReceiptId]
@@ -1055,9 +1109,12 @@ export const postGoodsReceipt = async (req, res) => {
           quantity,
           previous_quantity,
           new_quantity,
-          note
+          note,
+          company_id,
+          branch_id,
+          business_unit_id
         )
-        VALUES (?, ?, 'Restock', 'Goods Receipt', ?, ?, ?, ?, ?)
+        VALUES (?, ?, 'Restock', 'Goods Receipt', ?, ?, ?, ?, ?, ?, ?, ?)
         `,
         [
           Number(item.product_id),
@@ -1067,6 +1124,9 @@ export const postGoodsReceipt = async (req, res) => {
           stockState.previousQty,
           stockState.newQty,
           `${header.gr_number} from PO ${header.purchase_order_id}`,
+          scope.company_id,
+          scope.branch_id,
+          scope.business_unit_id,
         ]
       );
 
@@ -1153,9 +1213,9 @@ export const postGoodsReceipt = async (req, res) => {
       INNER JOIN purchase_orders po ON gr.purchase_order_id = po.id
       INNER JOIN suppliers s ON po.supplier_id = s.id
       INNER JOIN warehouses w ON gr.warehouse_id = w.id
-      WHERE gr.id = ?
+      WHERE gr.id = ? ${buildGoodsReceiptScope(scope, 'gr').sql}
       `,
-      [goodsReceiptId]
+      [goodsReceiptId, ...buildGoodsReceiptScope(scope, 'gr').values]
     );
 
     const [receiptItemRows] = await connection.query(
@@ -1182,7 +1242,7 @@ export const postGoodsReceipt = async (req, res) => {
   } catch (error) {
     await connection.rollback();
     console.error('Post goods receipt error:', error);
-    res.status(500).json({ message: 'Failed to post goods receipt' });
+    res.status(error.statusCode || 500).json({ message: error.message || 'Failed to post goods receipt' });
   } finally {
     connection.release();
   }

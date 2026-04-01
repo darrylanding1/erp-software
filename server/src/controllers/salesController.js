@@ -1,36 +1,37 @@
 import db from '../config/db.js';
 import { createAuditLog, getRequestIp } from '../utils/auditTrail.js';
+import {
+  assertScopeMatch,
+  buildScopeWhereClause,
+  requireDataScope,
+} from '../middleware/dataScopeMiddleware.js';
 
 const round2 = (value) => Number(Number(value || 0).toFixed(2));
 
-const getNextNumber = async (prefix, table, column) => {
-  const [rows] = await db.query(
-    `
-    SELECT ${column} AS document_number
-    FROM ${table}
-    ORDER BY id DESC
-    LIMIT 1
-    `
-  );
+const getNextNumber = async (prefix) => {
+  const stamp = Date.now();
+  const suffix = Math.floor(Math.random() * 1000)
+    .toString()
+    .padStart(3, '0');
 
-  if (!rows.length || !rows[0].document_number) {
-    return `${prefix}-00001`;
-  }
-
-  const currentNumber = rows[0].document_number;
-  const numericPart = Number(String(currentNumber).split('-').pop() || 0) + 1;
-  return `${prefix}-${String(numericPart).padStart(5, '0')}`;
+  return `${prefix}-${stamp}${suffix}`;
 };
 
-const getAccountByCode = async (accountCode) => {
-  const [rows] = await db.query(
+const getAccountByCode = async (accountCode, scope, connection = db) => {
+  const scopeFilter = buildScopeWhereClause(scope, {
+    company: 'company_id',
+    branch: 'branch_id',
+    businessUnit: 'business_unit_id',
+  });
+
+  const [rows] = await connection.query(
     `
-    SELECT id, account_code, account_name, account_type
+    SELECT id, account_code, account_name, account_type, company_id, branch_id, business_unit_id
     FROM chart_of_accounts
-    WHERE account_code = ?
+    WHERE account_code = ? ${scopeFilter.sql}
     LIMIT 1
     `,
-    [accountCode]
+    [accountCode, ...scopeFilter.values]
   );
 
   return rows[0] || null;
@@ -96,9 +97,9 @@ export const getCustomers = async (req, res) => {
         created_at,
         updated_at
       FROM customers
-      WHERE 1 = 1
+      WHERE 1 = 1 ${customerScope.sql}
     `;
-    const values = [];
+    const values = [...customerScope.values];
 
     if (search) {
       sql += ` AND (customer_code LIKE ? OR name LIKE ? OR contact_person LIKE ?)`;
@@ -384,7 +385,13 @@ export const deleteCustomer = async (req, res) => {
 
 export const getSalesInvoices = async (req, res) => {
   try {
+    const scope = requireDataScope(req);
     const { customer_id = '', status = '', date_from = '', date_to = '', search = '' } = req.query;
+    const customerScope = buildScopeWhereClause(scope, {
+      company: 'c.company_id',
+      branch: 'c.branch_id',
+      businessUnit: 'c.business_unit_id',
+    });
 
     let sql = `
       SELECT
@@ -427,9 +434,9 @@ export const getSalesInvoices = async (req, res) => {
       FROM sales_invoices si
       INNER JOIN customers c
         ON si.customer_id = c.id
-      WHERE 1 = 1
+      WHERE 1 = 1 ${customerScope.sql}
     `;
-    const values = [];
+    const values = [...customerScope.values];
 
     if (customer_id) {
       sql += ` AND si.customer_id = ?`;
@@ -563,6 +570,7 @@ export const createSalesInvoice = async (req, res) => {
   const connection = await db.getConnection();
 
   try {
+    const scope = requireDataScope(req);
     await connection.beginTransaction();
 
     const {
@@ -582,7 +590,7 @@ export const createSalesInvoice = async (req, res) => {
 
     const [[customer]] = await connection.query(
       `
-      SELECT id, name, status
+      SELECT id, name, status, company_id, branch_id, business_unit_id
       FROM customers
       WHERE id = ?
       LIMIT 1
@@ -595,13 +603,15 @@ export const createSalesInvoice = async (req, res) => {
       return res.status(404).json({ message: 'Customer not found' });
     }
 
+    assertScopeMatch(customer, scope);
+
     if (customer.status !== 'Active') {
       await connection.rollback();
       return res.status(400).json({ message: 'Customer is inactive' });
     }
 
-    const arAccount = await getAccountByCode('1100');
-    const salesRevenueAccount = await getAccountByCode('4000');
+    const arAccount = await getAccountByCode('1100', scope, connection);
+    const salesRevenueAccount = await getAccountByCode('4000', scope, connection);
 
     if (!arAccount || !salesRevenueAccount) {
       await connection.rollback();
@@ -628,7 +638,7 @@ export const createSalesInvoice = async (req, res) => {
 
       const [[product]] = await connection.query(
         `
-        SELECT id, name, sku
+        SELECT id, name, sku, company_id, branch_id, business_unit_id
         FROM products
         WHERE id = ?
         LIMIT 1
@@ -641,6 +651,8 @@ export const createSalesInvoice = async (req, res) => {
         return res.status(404).json({ message: `Product not found: ${productId}` });
       }
 
+      assertScopeMatch(product, scope);
+
       const lineTotal = round2(quantity * unitPrice);
       totalAmount = round2(totalAmount + lineTotal);
 
@@ -652,7 +664,7 @@ export const createSalesInvoice = async (req, res) => {
       });
     }
 
-    const invoiceNumber = await getNextNumber('SI', 'sales_invoices', 'invoice_number');
+    const invoiceNumber = await getNextNumber('SI');
 
     const [invoiceResult] = await connection.query(
       `
@@ -664,9 +676,12 @@ export const createSalesInvoice = async (req, res) => {
         due_date,
         status,
         remarks,
-        total_amount
+        total_amount,
+        company_id,
+        branch_id,
+        business_unit_id
       )
-      VALUES (?, ?, ?, ?, 'Posted', ?, ?)
+      VALUES (?, ?, ?, ?, 'Posted', ?, ?, ?, ?, ?)
       `,
       [
         invoiceNumber,
@@ -675,6 +690,9 @@ export const createSalesInvoice = async (req, res) => {
         due_date || null,
         remarks?.trim() || null,
         totalAmount,
+        scope.company_id,
+        scope.branch_id,
+        scope.business_unit_id,
       ]
     );
 
@@ -703,7 +721,7 @@ export const createSalesInvoice = async (req, res) => {
       );
     }
 
-    const entryNumber = await getNextNumber('JE', 'journal_entries', 'entry_number');
+    const entryNumber = await getNextNumber('JE');
 
     const [entryResult] = await connection.query(
       `
@@ -716,9 +734,12 @@ export const createSalesInvoice = async (req, res) => {
         memo,
         total_debit,
         total_credit,
-        status
+        status,
+        company_id,
+        branch_id,
+        business_unit_id
       )
-      VALUES (?, ?, 'Sales Invoice', ?, ?, ?, ?, 'Posted')
+      VALUES (?, ?, 'Sales Invoice', ?, ?, ?, ?, 'Posted', ?, ?, ?)
       `,
       [
         entryNumber,
@@ -727,6 +748,9 @@ export const createSalesInvoice = async (req, res) => {
         `Sales invoice posting for ${invoiceNumber}`,
         totalAmount,
         totalAmount,
+        scope.company_id,
+        scope.branch_id,
+        scope.business_unit_id,
       ]
     );
 
@@ -818,7 +842,13 @@ export const createSalesInvoice = async (req, res) => {
 
 export const getCustomerPayments = async (req, res) => {
   try {
+    const scope = requireDataScope(req);
     const { customer_id = '', sales_invoice_id = '', date_from = '', date_to = '' } = req.query;
+    const customerScope = buildScopeWhereClause(scope, {
+      company: 'c.company_id',
+      branch: 'c.branch_id',
+      businessUnit: 'c.business_unit_id',
+    });
 
     let sql = `
       SELECT
@@ -838,9 +868,9 @@ export const getCustomerPayments = async (req, res) => {
         ON cp.sales_invoice_id = si.id
       INNER JOIN customers c
         ON si.customer_id = c.id
-      WHERE 1 = 1
+      WHERE 1 = 1 ${customerScope.sql}
     `;
-    const values = [];
+    const values = [...customerScope.values];
 
     if (customer_id) {
       sql += ` AND si.customer_id = ?`;
@@ -876,6 +906,7 @@ export const createCustomerPayment = async (req, res) => {
   const connection = await db.getConnection();
 
   try {
+    const scope = requireDataScope(req);
     await connection.beginTransaction();
 
     const {
@@ -907,6 +938,9 @@ export const createCustomerPayment = async (req, res) => {
         si.status,
         si.customer_id,
         c.name AS customer_name,
+        c.company_id,
+        c.branch_id,
+        c.business_unit_id,
         COALESCE((
           SELECT SUM(cp.amount_paid)
           FROM customer_payments cp
@@ -932,6 +966,8 @@ export const createCustomerPayment = async (req, res) => {
       return res.status(404).json({ message: 'Sales invoice not found' });
     }
 
+    assertScopeMatch(invoice, scope);
+
     if (invoice.status === 'Cancelled') {
       await connection.rollback();
       return res.status(400).json({ message: 'Cannot pay a cancelled invoice' });
@@ -946,8 +982,8 @@ export const createCustomerPayment = async (req, res) => {
       });
     }
 
-    const cashAccount = await getAccountByCode('1000');
-    const arAccount = await getAccountByCode('1100');
+    const cashAccount = await getAccountByCode('1000', scope, connection);
+    const arAccount = await getAccountByCode('1100', scope, connection);
 
     if (!cashAccount || !arAccount) {
       await connection.rollback();
@@ -957,7 +993,7 @@ export const createCustomerPayment = async (req, res) => {
       });
     }
 
-    const paymentNumber = await getNextNumber('CR', 'customer_payments', 'payment_number');
+    const paymentNumber = await getNextNumber('CR');
 
     const [paymentResult] = await connection.query(
       `
@@ -969,9 +1005,12 @@ export const createCustomerPayment = async (req, res) => {
         payment_method,
         reference_number,
         amount_paid,
-        remarks
+        remarks,
+        company_id,
+        branch_id,
+        business_unit_id
       )
-      VALUES (?, ?, ?, ?, ?, ?, ?)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
       `,
       [
         paymentNumber,
@@ -981,6 +1020,9 @@ export const createCustomerPayment = async (req, res) => {
         reference_number?.trim() || null,
         paymentAmount,
         remarks?.trim() || null,
+        scope.company_id,
+        scope.branch_id,
+        scope.business_unit_id,
       ]
     );
 
@@ -1020,7 +1062,7 @@ export const createCustomerPayment = async (req, res) => {
       [newStatus, invoiceId]
     );
 
-    const entryNumber = await getNextNumber('JE', 'journal_entries', 'entry_number');
+    const entryNumber = await getNextNumber('JE');
 
     const [entryResult] = await connection.query(
       `
@@ -1033,9 +1075,12 @@ export const createCustomerPayment = async (req, res) => {
         memo,
         total_debit,
         total_credit,
-        status
+        status,
+        company_id,
+        branch_id,
+        business_unit_id
       )
-      VALUES (?, ?, 'Customer Payment', ?, ?, ?, ?, 'Posted')
+      VALUES (?, ?, 'Customer Payment', ?, ?, ?, ?, 'Posted', ?, ?, ?)
       `,
       [
         entryNumber,
@@ -1044,6 +1089,9 @@ export const createCustomerPayment = async (req, res) => {
         `Customer payment posting for ${paymentNumber}`,
         paymentAmount,
         paymentAmount,
+        scope.company_id,
+        scope.branch_id,
+        scope.business_unit_id,
       ]
     );
 
@@ -1145,6 +1193,7 @@ export const createCustomerPayment = async (req, res) => {
 
 export const getArAgingReport = async (req, res) => {
   try {
+    const scope = requireDataScope(req);
     const { customer_id = '', as_of_date = '' } = req.query;
     const asOf = as_of_date || new Date().toISOString().split('T')[0];
 
@@ -1174,13 +1223,14 @@ export const getArAgingReport = async (req, res) => {
       FROM sales_invoices si
       INNER JOIN customers c
         ON si.customer_id = c.id
-      WHERE si.status IN ('Posted', 'Partially Paid', 'Paid')
+      WHERE si.status IN ('Posted', 'Partially Paid', 'Paid') ${buildScopeWhereClause(scope, { company: 'c.company_id', branch: 'c.branch_id', businessUnit: 'c.business_unit_id' }).sql}
         ${customer_id ? 'AND si.customer_id = ?' : ''}
         ${as_of_date ? 'AND si.invoice_date <= ?' : ''}
       ORDER BY c.name ASC, si.due_date ASC, si.invoice_date ASC, si.id ASC
     `;
 
-    const values = [];
+    const arCustomerScope = buildScopeWhereClause(scope, { company: 'c.company_id', branch: 'c.branch_id', businessUnit: 'c.business_unit_id' });
+    const values = [...arCustomerScope.values];
     if (as_of_date) values.push(as_of_date);
     if (as_of_date) values.push(as_of_date);
     if (customer_id) values.push(Number(customer_id));
@@ -1304,6 +1354,7 @@ export const getArAgingReport = async (req, res) => {
 
 export const getCustomerLedger = async (req, res) => {
   try {
+    const scope = requireDataScope(req);
     const { customer_id = '', date_from = '', date_to = '' } = req.query;
 
     if (!customer_id) {
@@ -1312,7 +1363,7 @@ export const getCustomerLedger = async (req, res) => {
 
     const [customerRows] = await db.query(
       `
-      SELECT id, customer_code, name, contact_person, email, phone, address, status
+      SELECT id, customer_code, name, contact_person, email, phone, address, status, company_id, branch_id, business_unit_id
       FROM customers
       WHERE id = ?
       `,
@@ -1324,6 +1375,7 @@ export const getCustomerLedger = async (req, res) => {
     }
 
     const customer = customerRows[0];
+    assertScopeMatch(customer, scope);
 
     let invoiceSql = `
       SELECT

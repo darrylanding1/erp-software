@@ -1,26 +1,13 @@
 import db from '../config/db.js';
+import { buildScopeWhereClause, requireDataScope } from '../middleware/dataScopeMiddleware.js';
 import { createAuditLog, getRequestIp } from '../utils/auditTrail.js';
 
 const round2 = (value) => Number(Number(value || 0).toFixed(2));
 
-const getNextNumber = async (prefix, table, column) => {
-  const [rows] = await db.query(
-    `
-    SELECT ${column} AS document_number
-    FROM ${table}
-    ORDER BY id DESC
-    LIMIT 1
-    `
-  );
-
-  if (!rows.length || !rows[0].document_number) {
-    return `${prefix}-00001`;
-  }
-
-  const currentNumber = rows[0].document_number;
-  const numericPart = Number(String(currentNumber).split('-').pop() || 0) + 1;
-
-  return `${prefix}-${String(numericPart).padStart(5, '0')}`;
+const getNextNumber = async (prefix) => {
+  const stamp = Date.now().toString().slice(-8);
+  const random = Math.floor(Math.random() * 1000).toString().padStart(3, '0');
+  return `${prefix}-${stamp}${random}`;
 };
 
 const getSalesOrderInvoiceStatus = async (connection, salesOrderId) => {
@@ -44,15 +31,23 @@ const getSalesOrderInvoiceStatus = async (connection, salesOrderId) => {
   return 'Fully Invoiced';
 };
 
-export const getSalesOrderMeta = async (_req, res) => {
+export const getSalesOrderMeta = async (req, res) => {
   try {
+    const scope = requireDataScope(req);
     const [customers] = await db.query(
       `
       SELECT id, customer_code, name, status
       FROM customers
       WHERE status = 'Active'
+        AND company_id = ?
+        AND branch_id = ?
+        AND business_unit_id = ?
+        AND company_id = ?
+        AND branch_id = ?
+        AND business_unit_id = ?
       ORDER BY name ASC
-      `
+      `,
+      [scope.company_id, scope.branch_id, scope.business_unit_id]
     );
 
     const [warehouses] = await db.query(
@@ -61,7 +56,8 @@ export const getSalesOrderMeta = async (_req, res) => {
       FROM warehouses
       WHERE status = 'Active'
       ORDER BY name ASC
-      `
+      `,
+      [scope.company_id, scope.branch_id, scope.business_unit_id]
     );
 
     const [products] = await db.query(
@@ -74,8 +70,12 @@ export const getSalesOrderMeta = async (_req, res) => {
         p.market_price,
         p.status
       FROM products p
+      WHERE p.company_id = ?
+        AND p.branch_id = ?
+        AND p.business_unit_id = ?
       ORDER BY p.name ASC
-      `
+      `,
+      [scope.company_id, scope.branch_id, scope.business_unit_id]
     );
 
     res.json({
@@ -91,6 +91,7 @@ export const getSalesOrderMeta = async (_req, res) => {
 
 export const getSalesOrders = async (req, res) => {
   try {
+    const scope = requireDataScope(req);
     const {
       customer_id = '',
       warehouse_id = '',
@@ -144,9 +145,11 @@ export const getSalesOrders = async (req, res) => {
         GROUP BY sales_order_id
       ) agg
         ON agg.sales_order_id = so.id
-      WHERE 1 = 1
+      WHERE so.company_id = ?
+        AND so.branch_id = ?
+        AND so.business_unit_id = ?
     `;
-    const values = [];
+    const values = [scope.company_id, scope.branch_id, scope.business_unit_id];
 
     if (customer_id) {
       sql += ` AND so.customer_id = ?`;
@@ -248,6 +251,7 @@ export const createSalesOrder = async (req, res) => {
   const connection = await db.getConnection();
 
   try {
+    const scope = requireDataScope(req);
     const {
       customer_id,
       warehouse_id,
@@ -294,9 +298,12 @@ export const createSalesOrder = async (req, res) => {
       SELECT id, name, status
       FROM customers
       WHERE id = ?
+        AND company_id = ?
+        AND branch_id = ?
+        AND business_unit_id = ?
       FOR UPDATE
       `,
-      [Number(customer_id)]
+      [Number(customer_id), scope.company_id, scope.branch_id, scope.business_unit_id]
     );
 
     if (!customerRow || customerRow.status !== 'Active') {
@@ -309,9 +316,12 @@ export const createSalesOrder = async (req, res) => {
       SELECT id, name, code, status
       FROM warehouses
       WHERE id = ?
+        AND company_id = ?
+        AND branch_id = ?
+        AND business_unit_id = ?
       FOR UPDATE
       `,
-      [Number(warehouse_id)]
+      [Number(warehouse_id), scope.company_id, scope.branch_id, scope.business_unit_id]
     );
 
     if (!warehouseRow || warehouseRow.status !== 'Active') {
@@ -319,7 +329,7 @@ export const createSalesOrder = async (req, res) => {
       return res.status(400).json({ message: 'Selected warehouse is invalid or inactive' });
     }
 
-    const soNumber = await getNextNumber('SO', 'sales_orders', 'so_number');
+    const soNumber = await getNextNumber('SO');
 
     let totalAmount = 0;
 
@@ -349,9 +359,12 @@ export const createSalesOrder = async (req, res) => {
         status,
         remarks,
         total_amount,
-        created_by
+        created_by,
+        company_id,
+        branch_id,
+        business_unit_id
       )
-      VALUES (?, ?, ?, ?, ?, 'Draft', ?, ?, ?)
+      VALUES (?, ?, ?, ?, ?, 'Draft', ?, ?, ?, ?, ?, ?)
       `,
       [
         soNumber,
@@ -362,6 +375,9 @@ export const createSalesOrder = async (req, res) => {
         remarks?.trim() || null,
         round2(totalAmount),
         req.user?.id || null,
+        scope.company_id,
+        scope.branch_id,
+        scope.business_unit_id,
       ]
     );
 
@@ -407,8 +423,11 @@ export const createSalesOrder = async (req, res) => {
       INNER JOIN warehouses w
         ON w.id = so.warehouse_id
       WHERE so.id = ?
+        AND so.company_id = ?
+        AND so.branch_id = ?
+        AND so.business_unit_id = ?
       `,
-      [salesOrderId]
+      [salesOrderId, scope.company_id, scope.branch_id, scope.business_unit_id]
     );
 
     const [createdItems] = await db.query(
@@ -423,7 +442,7 @@ export const createSalesOrder = async (req, res) => {
       WHERE soi.sales_order_id = ?
       ORDER BY soi.id ASC
       `,
-      [salesOrderId]
+      [salesOrderId, scope.company_id, scope.branch_id, scope.business_unit_id]
     );
 
     try {
@@ -455,6 +474,7 @@ export const createSalesOrder = async (req, res) => {
 
 export const approveSalesOrder = async (req, res) => {
   try {
+    const scope = requireDataScope(req);
     const salesOrderId = Number(req.params.id);
 
     if (!salesOrderId) {
@@ -466,8 +486,11 @@ export const approveSalesOrder = async (req, res) => {
       SELECT *
       FROM sales_orders
       WHERE id = ?
+        AND company_id = ?
+        AND branch_id = ?
+        AND business_unit_id = ?
       `,
-      [salesOrderId]
+      [salesOrderId, scope.company_id, scope.branch_id, scope.business_unit_id]
     );
 
     if (!existingRows.length) {
@@ -501,8 +524,11 @@ export const approveSalesOrder = async (req, res) => {
       SELECT *
       FROM sales_orders
       WHERE id = ?
+        AND company_id = ?
+        AND branch_id = ?
+        AND business_unit_id = ?
       `,
-      [salesOrderId]
+      [salesOrderId, scope.company_id, scope.branch_id, scope.business_unit_id]
     );
 
     try {
@@ -532,6 +558,7 @@ export const approveSalesOrder = async (req, res) => {
 
 export const cancelSalesOrder = async (req, res) => {
   try {
+    const scope = requireDataScope(req);
     const salesOrderId = Number(req.params.id);
 
     if (!salesOrderId) {
@@ -608,6 +635,7 @@ export const createInvoiceFromSalesOrder = async (req, res) => {
   const connection = await db.getConnection();
 
   try {
+    const scope = requireDataScope(req);
     const salesOrderId = Number(req.params.id);
     const {
       invoice_date,
@@ -631,6 +659,9 @@ export const createInvoiceFromSalesOrder = async (req, res) => {
       SELECT *
       FROM sales_orders
       WHERE id = ?
+        AND company_id = ?
+        AND branch_id = ?
+        AND business_unit_id = ?
       FOR UPDATE
       `,
       [salesOrderId]
@@ -733,7 +764,7 @@ export const createInvoiceFromSalesOrder = async (req, res) => {
       return res.status(400).json({ message: 'No valid invoice quantities were provided' });
     }
 
-    const invoiceNumber = await getNextNumber('SI', 'sales_invoices', 'invoice_number');
+    const invoiceNumber = await getNextNumber('SI');
 
     const [invoiceResult] = await connection.query(
       `
@@ -748,9 +779,12 @@ export const createInvoiceFromSalesOrder = async (req, res) => {
         status,
         delivery_status,
         remarks,
-        total_amount
+        total_amount,
+        company_id,
+        branch_id,
+        business_unit_id
       )
-      VALUES (?, ?, ?, ?, ?, ?, 'Posted', 'Not Delivered', ?, ?)
+      VALUES (?, ?, ?, ?, ?, ?, 'Posted', 'Not Delivered', ?, ?, ?, ?, ?)
       `,
       [
         invoiceNumber,
@@ -761,6 +795,9 @@ export const createInvoiceFromSalesOrder = async (req, res) => {
         due_date || null,
         remarks?.trim() || salesOrder.remarks || null,
         round2(invoiceTotal),
+        scope.company_id,
+        scope.branch_id,
+        scope.business_unit_id,
       ]
     );
 
@@ -816,8 +853,11 @@ export const createInvoiceFromSalesOrder = async (req, res) => {
       SELECT *
       FROM sales_invoices
       WHERE id = ?
+        AND company_id = ?
+        AND branch_id = ?
+        AND business_unit_id = ?
       `,
-      [salesInvoiceId]
+      [salesInvoiceId, scope.company_id, scope.branch_id, scope.business_unit_id]
     );
 
     const [createdInvoiceItems] = await db.query(

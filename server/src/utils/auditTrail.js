@@ -9,6 +9,9 @@ export const createAuditLog = async ({
   oldValues = null,
   newValues = null,
   ipAddress = null,
+  company_id = null,
+  branch_id = null,
+  business_unit_id = null,
 }) => {
   try {
     await db.query(
@@ -21,9 +24,12 @@ export const createAuditLog = async ({
         description,
         old_values,
         new_values,
-        ip_address
+        ip_address,
+        company_id,
+        branch_id,
+        business_unit_id
       )
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
       `,
       [
         userId,
@@ -34,6 +40,9 @@ export const createAuditLog = async ({
         oldValues ? JSON.stringify(oldValues) : null,
         newValues ? JSON.stringify(newValues) : null,
         ipAddress,
+        company_id,
+        branch_id,
+        business_unit_id,
       ]
     );
   } catch (error) {

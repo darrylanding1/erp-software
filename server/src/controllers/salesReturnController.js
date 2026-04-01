@@ -1,36 +1,24 @@
 import db from '../config/db.js';
+import { buildScopeWhereClause, requireDataScope } from '../middleware/dataScopeMiddleware.js';
 import { increaseWarehouseStock } from '../utils/inventoryStock.js';
 
 const round2 = (value) => Number(Number(value || 0).toFixed(2));
 
-const getNextNumber = async (prefix, table, column) => {
-  const [rows] = await db.query(
-    `
-    SELECT ${column} AS document_number
-    FROM ${table}
-    ORDER BY id DESC
-    LIMIT 1
-    `
-  );
-
-  if (!rows.length || !rows[0].document_number) {
-    return `${prefix}-00001`;
-  }
-
-  const currentNumber = rows[0].document_number;
-  const numericPart = Number(String(currentNumber).split('-').pop() || 0) + 1;
-  return `${prefix}-${String(numericPart).padStart(5, '0')}`;
+const getNextNumber = async (prefix) => {
+  const stamp = Date.now().toString().slice(-8);
+  const random = Math.floor(Math.random() * 1000).toString().padStart(3, '0');
+  return `${prefix}-${stamp}${random}`;
 };
 
-const getAccountByCode = async (accountCode) => {
+const getAccountByCode = async (accountCode, scope) => {
   const [rows] = await db.query(
     `
     SELECT id, account_code, account_name
     FROM chart_of_accounts
-    WHERE account_code = ?
+    WHERE account_code = ? AND company_id = ? AND branch_id = ? AND business_unit_id = ?
     LIMIT 1
     `,
-    [accountCode]
+    [accountCode, scope.company_id, scope.branch_id, scope.business_unit_id]
   );
 
   return rows[0] || null;
@@ -136,6 +124,7 @@ const updateSalesInvoiceSettlementStatus = async (connection, salesInvoiceId) =>
 
 export const getReturnCandidates = async (req, res) => {
   try {
+    const scope = requireDataScope(req);
     const { sales_invoice_id = '', warehouse_id = '' } = req.query;
 
     let sql = `
@@ -158,8 +147,11 @@ export const getReturnCandidates = async (req, res) => {
       INNER JOIN warehouses w
         ON w.id = sd.warehouse_id
       WHERE sd.status = 'Posted'
+        AND sd.company_id = ?
+        AND sd.branch_id = ?
+        AND sd.business_unit_id = ?
     `;
-    const values = [];
+    const values = [scope.company_id, scope.branch_id, scope.business_unit_id];
 
     if (sales_invoice_id) {
       sql += ` AND sd.sales_invoice_id = ?`;
@@ -244,6 +236,7 @@ export const getReturnCandidates = async (req, res) => {
 
 export const getSalesReturns = async (req, res) => {
   try {
+    const scope = requireDataScope(req);
     const {
       sales_invoice_id = '',
       warehouse_id = '',
@@ -275,9 +268,11 @@ export const getSalesReturns = async (req, res) => {
         ON c.id = si.customer_id
       INNER JOIN warehouses w
         ON w.id = sr.warehouse_id
-      WHERE 1 = 1
+      WHERE sr.company_id = ?
+        AND sr.branch_id = ?
+        AND sr.business_unit_id = ?
     `;
-    const values = [];
+    const values = [scope.company_id, scope.branch_id, scope.business_unit_id];
 
     if (sales_invoice_id) {
       sql += ` AND sr.sales_invoice_id = ?`;
@@ -360,6 +355,7 @@ export const createSalesReturn = async (req, res) => {
   const connection = await db.getConnection();
 
   try {
+    const scope = requireDataScope(req);
     await connection.beginTransaction();
 
     const {
@@ -382,8 +378,8 @@ export const createSalesReturn = async (req, res) => {
       });
     }
 
-    const inventoryAccount = await getAccountByCode('1200');
-    const cogsAccount = await getAccountByCode('5000');
+    const inventoryAccount = await getAccountByCode('1200', scope);
+    const cogsAccount = await getAccountByCode('5000', scope);
 
     if (!inventoryAccount || !cogsAccount) {
       await connection.rollback();
@@ -784,6 +780,7 @@ export const getCreditMemoCandidates = async (req, res) => {
 
 export const getArCreditMemos = async (req, res) => {
   try {
+    const scope = requireDataScope(req);
     const {
       sales_invoice_id = '',
       date_from = '',
@@ -812,9 +809,11 @@ export const getArCreditMemos = async (req, res) => {
         ON si.id = acm.sales_invoice_id
       INNER JOIN customers c
         ON c.id = acm.customer_id
-      WHERE 1 = 1
+      WHERE sr.company_id = ?
+        AND sr.branch_id = ?
+        AND sr.business_unit_id = ?
     `;
-    const values = [];
+    const values = [scope.company_id, scope.branch_id, scope.business_unit_id];
 
     if (sales_invoice_id) {
       sql += ` AND acm.sales_invoice_id = ?`;
@@ -936,7 +935,7 @@ export const createArCreditMemo = async (req, res) => {
       return res.status(404).json({ message: 'Posted sales return not found' });
     }
 
-    const arAccount = await getAccountByCode('1100');
+    const arAccount = await getAccountByCode('1100', scope);
     const salesReturnsAccount = await getAccountByCode('4010');
 
     if (!arAccount || !salesReturnsAccount) {

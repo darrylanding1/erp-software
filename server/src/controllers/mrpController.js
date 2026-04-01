@@ -1,4 +1,5 @@
 import { withTransaction } from '../utils/dbTransaction.js';
+import { requireDataScope } from '../middleware/dataScopeMiddleware.js';
 import {
   getMrpMetaService,
   getMrpPoliciesService,
@@ -9,9 +10,9 @@ import {
   getMrpRunByIdService,
 } from '../services/mrpService.js';
 
-export const getMrpMeta = async (_req, res) => {
+export const getMrpMeta = async (req, res) => {
   try {
-    const data = await getMrpMetaService();
+    const data = await getMrpMetaService(requireDataScope(req));
     res.json(data);
   } catch (error) {
     console.error('Get MRP meta error:', error);
@@ -21,7 +22,7 @@ export const getMrpMeta = async (_req, res) => {
 
 export const getMrpPolicies = async (req, res) => {
   try {
-    const data = await getMrpPoliciesService(req.query);
+    const data = await getMrpPoliciesService(req.query, requireDataScope(req));
     res.json(data);
   } catch (error) {
     console.error('Get MRP policies error:', error);
@@ -32,7 +33,7 @@ export const getMrpPolicies = async (req, res) => {
 export const upsertMrpPolicy = async (req, res) => {
   try {
     const result = await withTransaction(async (connection) => {
-      return upsertMrpPolicyService(connection, req.body, req.user?.id);
+      return upsertMrpPolicyService(connection, req.body, req.user?.id, requireDataScope(req));
     });
 
     res.status(201).json(result);
@@ -46,7 +47,7 @@ export const upsertMrpPolicy = async (req, res) => {
 
 export const getMrpRecommendations = async (req, res) => {
   try {
-    const data = await getMrpRecommendationsService(req.query);
+    const data = await getMrpRecommendationsService(req.query, requireDataScope(req));
     res.json(data);
   } catch (error) {
     console.error('Get MRP recommendations error:', error);
@@ -57,7 +58,7 @@ export const getMrpRecommendations = async (req, res) => {
 export const createMrpRun = async (req, res) => {
   try {
     const result = await withTransaction(async (connection) => {
-      return createMrpRunService(connection, req.body, req.user?.id);
+      return createMrpRunService(connection, req.body, req.user?.id, requireDataScope(req));
     });
 
     res.status(201).json(result);
@@ -69,7 +70,7 @@ export const createMrpRun = async (req, res) => {
 
 export const getMrpRuns = async (req, res) => {
   try {
-    const data = await getMrpRunsService(req.query);
+    const data = await getMrpRunsService(req.query, requireDataScope(req));
     res.json(data);
   } catch (error) {
     console.error('Get MRP runs error:', error);
@@ -79,7 +80,7 @@ export const getMrpRuns = async (req, res) => {
 
 export const getMrpRunById = async (req, res) => {
   try {
-    const data = await getMrpRunByIdService(Number(req.params.id));
+    const data = await getMrpRunByIdService(Number(req.params.id), requireDataScope(req));
 
     if (!data) {
       return res.status(404).json({ message: 'MRP run not found' });

@@ -7,7 +7,7 @@ import {
 } from '../utils/journalPosting.js';
 import { increaseWarehouseStock } from '../utils/inventoryStock.js';
 import { ensurePostingDateIsOpen } from '../utils/postingLock.js';
-import { buildScopeWhereClause } from '../middleware/dataScopeMiddleware.js';
+import { buildScopeWhereClause, requireDataScope } from '../middleware/dataScopeMiddleware.js';
 
 const getStockStatus = (quantity) => {
   const qty = Number(quantity) || 0;
@@ -175,7 +175,7 @@ const assertWarehouseScopeAccess = async (connection, warehouseId, scope) => {
 
 export const getPurchaseJournalEntries = async (req, res) => {
   try {
-    const { company_id, branch_id, business_unit_id } = req.dataScope;
+    const { company_id, branch_id, business_unit_id } = requireDataScope(req);
 
     const entries = await getJournalEntriesByReferenceTypes(db, [
       'AP Invoice',
@@ -201,52 +201,63 @@ export const getPurchaseJournalEntries = async (req, res) => {
 
 export const getPurchaseMeta = async (req, res) => {
   try {
-    const { company_id, branch_id, business_unit_id } = req.dataScope;
+    const scope = requireDataScope(req);
+    const supplierScope = buildScopeWhereClause(scope, {
+      company: 's.company_id',
+      branch: 's.branch_id',
+      businessUnit: 's.business_unit_id',
+    });
+    const productScope = buildScopeWhereClause(scope, {
+      company: 'p.company_id',
+      branch: 'p.branch_id',
+      businessUnit: 'p.business_unit_id',
+    });
+    const warehouseScope = buildScopeWhereClause(scope, {
+      company: 'w.company_id',
+      branch: 'w.branch_id',
+      businessUnit: 'w.business_unit_id',
+    });
 
     const [suppliers] = await db.query(
       `
-      SELECT id, name, contact_person, email, phone
-      FROM suppliers
-      WHERE status = 'Active'
-      ORDER BY name ASC
-      `
+      SELECT s.id, s.name, s.contact_person, s.email, s.phone
+      FROM suppliers s
+      WHERE s.status = 'Active' ${supplierScope.sql}
+      ORDER BY s.name ASC
+      `,
+      supplierScope.values
     );
 
     const [products] = await db.query(
       `
-      SELECT id, name, sku, base_price, market_price, quantity, status
-      FROM products
-      ORDER BY name ASC
-      `
+      SELECT p.id, p.name, p.sku, p.base_price, p.market_price, p.quantity, p.status
+      FROM products p
+      WHERE 1 = 1 ${productScope.sql}
+      ORDER BY p.name ASC
+      `,
+      productScope.values
     );
 
     const [warehouses] = await db.query(
       `
-      SELECT id, name, code, address, status
-      FROM warehouses
-      WHERE status = 'Active'
-        AND company_id = ?
-        AND branch_id = ?
-        AND business_unit_id = ?
-      ORDER BY name ASC
+      SELECT w.id, w.name, w.code, w.address, w.status
+      FROM warehouses w
+      WHERE w.status = 'Active' ${warehouseScope.sql}
+      ORDER BY w.name ASC
       `,
-      [company_id, branch_id, business_unit_id]
+      warehouseScope.values
     );
 
-    res.json({
-      suppliers,
-      products,
-      warehouses,
-    });
+    res.json({ suppliers, products, warehouses });
   } catch (error) {
     console.error('Get purchase meta error:', error);
-    res.status(500).json({ message: 'Failed to fetch purchase metadata' });
+    res.status(error.statusCode || 500).json({ message: error.message || 'Failed to fetch purchase metadata' });
   }
 };
 
 export const getPurchaseOrders = async (req, res) => {
   try {
-    const { company_id, branch_id, business_unit_id } = req.dataScope;
+    const { company_id, branch_id, business_unit_id } = requireDataScope(req);
     const { search = '', status = '', supplier_id = '' } = req.query;
 
     let sql = `
@@ -336,7 +347,7 @@ export const createPurchaseOrder = async (req, res) => {
   try {
     await connection.beginTransaction();
 
-    const { company_id, branch_id, business_unit_id } = req.dataScope;
+    const { company_id, branch_id, business_unit_id } = requireDataScope(req);
     const { supplier_id, order_date, notes, items } = req.body;
 
     if (!supplier_id || !order_date || !Array.isArray(items) || items.length === 0) {
@@ -458,7 +469,7 @@ export const receivePurchaseOrder = async (req, res) => {
   try {
     await connection.beginTransaction();
 
-    const { company_id, branch_id, business_unit_id } = req.dataScope;
+    const { company_id, branch_id, business_unit_id } = requireDataScope(req);
     const { id } = req.params;
     const { warehouse_id, receipt_date, remarks, items } = req.body;
 
@@ -497,7 +508,7 @@ export const receivePurchaseOrder = async (req, res) => {
       return res.status(400).json({ message: 'Cancelled PO cannot be received' });
     }
 
-    await assertWarehouseScopeAccess(connection, warehouseId, req.dataScope);
+    await assertWarehouseScopeAccess(connection, warehouseId, requireDataScope(req));
 
     const poItemMap = new Map();
     for (const item of purchaseOrder.items) {
@@ -707,7 +718,7 @@ export const receivePurchaseOrder = async (req, res) => {
 
 export const getGoodsReceipts = async (req, res) => {
   try {
-    const { company_id, branch_id, business_unit_id } = req.dataScope;
+    const { company_id, branch_id, business_unit_id } = requireDataScope(req);
     const { search = '', purchase_order_id = '', warehouse_id = '' } = req.query;
 
     let sql = `
@@ -797,7 +808,7 @@ export const getGoodsReceipts = async (req, res) => {
 
 export const getApInvoices = async (req, res) => {
   try {
-    const { company_id, branch_id, business_unit_id } = req.dataScope;
+    const { company_id, branch_id, business_unit_id } = requireDataScope(req);
     const { search = '', status = '', supplier_id = '' } = req.query;
 
     let sql = `
@@ -888,7 +899,7 @@ export const getApInvoices = async (req, res) => {
 
 export const getInvoiceablePurchaseOrders = async (req, res) => {
   try {
-    const { company_id, branch_id, business_unit_id } = req.dataScope;
+    const { company_id, branch_id, business_unit_id } = requireDataScope(req);
 
     const [poRows] = await db.query(
       `
@@ -947,7 +958,7 @@ export const createApInvoice = async (req, res) => {
   try {
     await connection.beginTransaction();
 
-    const { company_id, branch_id, business_unit_id } = req.dataScope;
+    const { company_id, branch_id, business_unit_id } = requireDataScope(req);
     const {
       purchase_order_id,
       supplier_invoice_number,
@@ -1192,7 +1203,7 @@ export const createApInvoice = async (req, res) => {
 
 export const getApPayments = async (req, res) => {
   try {
-    const { company_id, branch_id, business_unit_id } = req.dataScope;
+    const { company_id, branch_id, business_unit_id } = requireDataScope(req);
     const { search = '', supplier_id = '', ap_invoice_id = '' } = req.query;
 
     let sql = `
@@ -1262,7 +1273,7 @@ export const getApPayments = async (req, res) => {
 
 export const getPayableInvoices = async (req, res) => {
   try {
-    const { company_id, branch_id, business_unit_id } = req.dataScope;
+    const { company_id, branch_id, business_unit_id } = requireDataScope(req);
 
     const [rows] = await db.query(
       `
@@ -1294,7 +1305,7 @@ export const postApPayment = async (req, res) => {
   const connection = await db.getConnection();
 
   try {
-    const { company_id, branch_id, business_unit_id } = req.dataScope;
+    const { company_id, branch_id, business_unit_id } = requireDataScope(req);
     const paymentId = Number(req.params.id);
 
     await connection.beginTransaction();
@@ -1362,7 +1373,7 @@ export const createApPayment = async (req, res) => {
   try {
     await connection.beginTransaction();
 
-    const { company_id, branch_id, business_unit_id } = req.dataScope;
+    const { company_id, branch_id, business_unit_id } = requireDataScope(req);
     const {
       ap_invoice_id,
       payment_date,
