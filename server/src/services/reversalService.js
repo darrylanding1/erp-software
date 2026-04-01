@@ -1,4 +1,3 @@
-// server/src/services/reversalService.js
 import { withTransaction } from '../utils/dbTransaction.js';
 import {
   getOrCreateInventoryStockRowForUpdate,
@@ -6,8 +5,7 @@ import {
   updateInventoryStockSnapshot,
 } from './inventoryCostingService.js';
 import { getLedgerByReference, insertInventoryLedger } from './inventoryLedgerService.js';
-import { createJournalEntry, getAccountByCode } from './journalPostingService.js';
-import { ACCOUNT_CODES } from '../constants/accountCodes.js';
+import { reverseDocumentGL } from './glPostingEngine.js';
 
 export const reverseSalesDelivery = async ({ salesDeliveryId, userId, reason }) => {
   return withTransaction(async (connection) => {
@@ -30,8 +28,6 @@ export const reverseSalesDelivery = async ({ salesDeliveryId, userId, reason }) 
       throw new Error('No inventory ledger found for this sales delivery');
     }
 
-    let totalReverseValue = 0;
-
     for (const row of ledgerRows) {
       const stockRow = await getOrCreateInventoryStockRowForUpdate(
         connection,
@@ -45,8 +41,6 @@ export const reverseSalesDelivery = async ({ salesDeliveryId, userId, reason }) 
         receivedQty: row.quantity_out,
         receivedUnitCost: row.unit_cost,
       });
-
-      totalReverseValue += Number(row.line_total || 0);
 
       await updateInventoryStockSnapshot(connection, stockRow.id, {
         quantity: costing.qtyAfter,
@@ -88,32 +82,14 @@ export const reverseSalesDelivery = async ({ salesDeliveryId, userId, reason }) 
       );
     }
 
-    const inventoryAccount = await getAccountByCode(connection, ACCOUNT_CODES.INVENTORY_ASSET);
-    const cogsAccount = await getAccountByCode(connection, ACCOUNT_CODES.COST_OF_GOODS_SOLD);
-
-    await createJournalEntry(connection, {
-      entryDate: new Date().toISOString().slice(0, 10),
-      referenceType: 'SalesDeliveryReversal',
+    await reverseDocumentGL({
+      referenceType: 'SalesDelivery',
       referenceId: salesDeliveryId,
-      memo: `Reversal of sales delivery ${delivery.delivery_number}`,
-      lines: [
-        {
-          account_id: inventoryAccount.id,
-          account_code: inventoryAccount.account_code,
-          account_name: inventoryAccount.account_name,
-          description: 'Restore inventory',
-          debit: totalReverseValue,
-          credit: 0,
-        },
-        {
-          account_id: cogsAccount.id,
-          account_code: cogsAccount.account_code,
-          account_name: cogsAccount.account_name,
-          description: 'Reverse COGS',
-          debit: 0,
-          credit: totalReverseValue,
-        },
-      ],
+      reversalDate: new Date().toISOString().slice(0, 10),
+      memo: reason
+        ? `Reversal of sales delivery ${delivery.delivery_number} - ${reason}`
+        : `Reversal of sales delivery ${delivery.delivery_number}`,
+      connection,
     });
 
     await connection.query(

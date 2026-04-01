@@ -1,6 +1,7 @@
 import db from '../config/db.js';
 import { buildScopeWhereClause, requireDataScope } from '../middleware/dataScopeMiddleware.js';
 import { increaseWarehouseStock } from '../utils/inventoryStock.js';
+import { createJournalEntry as createGLJournalEntry } from '../services/glPostingEngine.js';
 
 const round2 = (value) => Number(Number(value || 0).toFixed(2));
 
@@ -590,67 +591,31 @@ export const createSalesReturn = async (req, res) => {
       );
     }
 
-    const entryNumber = await getNextNumber('JE', 'journal_entries', 'entry_number');
-
-    const [entryResult] = await connection.query(
-      `
-      INSERT INTO journal_entries
-      (
-        entry_number,
-        entry_date,
-        reference_type,
-        reference_id,
-        memo,
-        total_debit,
-        total_credit,
-        status
-      )
-      VALUES (?, ?, 'Sales Return', ?, ?, ?, ?, 'Posted')
-      `,
-      [
-        entryNumber,
-        return_date,
-        salesReturnId,
-        `Reverse COGS for ${returnNumber}`,
-        totalCost,
-        totalCost,
-      ]
-    );
-
-    const journalEntryId = entryResult.insertId;
-
-    await connection.query(
-      `
-      INSERT INTO journal_entry_lines
-      (
-        journal_entry_id,
-        account_id,
-        account_code,
-        account_name,
-        description,
-        debit,
-        credit
-      )
-      VALUES
-      (?, ?, ?, ?, ?, ?, 0),
-      (?, ?, ?, ?, ?, 0, ?)
-      `,
-      [
-        journalEntryId,
-        inventoryAccount.id,
-        inventoryAccount.account_code,
-        inventoryAccount.account_name,
-        `Inventory return for ${returnNumber}`,
-        totalCost,
-
-        journalEntryId,
-        cogsAccount.id,
-        cogsAccount.account_code,
-        cogsAccount.account_name,
-        `COGS reversal for ${returnNumber}`,
-        totalCost,
-      ]
-    );
+    await createGLJournalEntry(connection, {
+      entryDate: return_date,
+      referenceType: 'Sales Return',
+      referenceId: salesReturnId,
+      memo: `Reverse COGS for ${returnNumber}`,
+      scope,
+      lines: [
+        {
+          account_id: inventoryAccount.id,
+          account_code: inventoryAccount.account_code,
+          account_name: inventoryAccount.account_name,
+          description: `Inventory return for ${returnNumber}`,
+          debit: totalCost,
+          credit: 0,
+        },
+        {
+          account_id: cogsAccount.id,
+          account_code: cogsAccount.account_code,
+          account_name: cogsAccount.account_name,
+          description: `COGS reversal for ${returnNumber}`,
+          debit: 0,
+          credit: totalCost,
+        },
+      ],
+    });
 
     await updateSalesInvoiceDeliveryStatus(connection, salesInvoiceId);
 
@@ -663,7 +628,7 @@ export const createSalesReturn = async (req, res) => {
   } catch (error) {
     await connection.rollback();
     console.error('Create sales return error:', error);
-    res.status(500).json({ message: 'Failed to create sales return' });
+    res.status(500).json({ message: error.message || 'Failed to create sales return' });
   } finally {
     connection.release();
   }
@@ -893,6 +858,7 @@ export const createArCreditMemo = async (req, res) => {
   const connection = await db.getConnection();
 
   try {
+    const scope = requireDataScope(req);
     await connection.beginTransaction();
 
     const {
@@ -917,6 +883,9 @@ export const createArCreditMemo = async (req, res) => {
         sr.id,
         sr.return_number,
         sr.sales_invoice_id,
+        sr.company_id,
+        sr.branch_id,
+        sr.business_unit_id,
         si.customer_id,
         si.invoice_number,
         si.total_amount
@@ -935,8 +904,10 @@ export const createArCreditMemo = async (req, res) => {
       return res.status(404).json({ message: 'Posted sales return not found' });
     }
 
+    assertScopeMatch(salesReturn, scope);
+
     const arAccount = await getAccountByCode('1100', scope);
-    const salesReturnsAccount = await getAccountByCode('4010');
+    const salesReturnsAccount = await getAccountByCode('4010', scope);
 
     if (!arAccount || !salesReturnsAccount) {
       await connection.rollback();
@@ -1066,9 +1037,12 @@ export const createArCreditMemo = async (req, res) => {
         credit_date,
         status,
         remarks,
-        total_amount
+        total_amount,
+        company_id,
+        branch_id,
+        business_unit_id
       )
-      VALUES (?, ?, ?, ?, ?, 'Posted', ?, ?)
+      VALUES (?, ?, ?, ?, ?, 'Posted', ?, ?, ?, ?, ?)
       `,
       [
         creditMemoNumber,
@@ -1078,6 +1052,9 @@ export const createArCreditMemo = async (req, res) => {
         credit_date,
         remarks?.trim() || null,
         totalAmount,
+        scope.company_id,
+        scope.branch_id,
+        scope.business_unit_id,
       ]
     );
 
@@ -1112,67 +1089,31 @@ export const createArCreditMemo = async (req, res) => {
       );
     }
 
-    const entryNumber = await getNextNumber('JE', 'journal_entries', 'entry_number');
-
-    const [entryResult] = await connection.query(
-      `
-      INSERT INTO journal_entries
-      (
-        entry_number,
-        entry_date,
-        reference_type,
-        reference_id,
-        memo,
-        total_debit,
-        total_credit,
-        status
-      )
-      VALUES (?, ?, 'AR Credit Memo', ?, ?, ?, ?, 'Posted')
-      `,
-      [
-        entryNumber,
-        credit_date,
-        creditMemoId,
-        `AR credit memo posting for ${creditMemoNumber}`,
-        totalAmount,
-        totalAmount,
-      ]
-    );
-
-    const journalEntryId = entryResult.insertId;
-
-    await connection.query(
-      `
-      INSERT INTO journal_entry_lines
-      (
-        journal_entry_id,
-        account_id,
-        account_code,
-        account_name,
-        description,
-        debit,
-        credit
-      )
-      VALUES
-      (?, ?, ?, ?, ?, ?, 0),
-      (?, ?, ?, ?, ?, 0, ?)
-      `,
-      [
-        journalEntryId,
-        salesReturnsAccount.id,
-        salesReturnsAccount.account_code,
-        salesReturnsAccount.account_name,
-        `Sales return allowance for ${creditMemoNumber}`,
-        totalAmount,
-
-        journalEntryId,
-        arAccount.id,
-        arAccount.account_code,
-        arAccount.account_name,
-        `Reduce AR for ${creditMemoNumber}`,
-        totalAmount,
-      ]
-    );
+    await createGLJournalEntry(connection, {
+      entryDate: credit_date,
+      referenceType: 'AR Credit Memo',
+      referenceId: creditMemoId,
+      memo: `AR credit memo posting for ${creditMemoNumber}`,
+      scope,
+      lines: [
+        {
+          account_id: salesReturnsAccount.id,
+          account_code: salesReturnsAccount.account_code,
+          account_name: salesReturnsAccount.account_name,
+          description: `Sales return allowance for ${creditMemoNumber}`,
+          debit: totalAmount,
+          credit: 0,
+        },
+        {
+          account_id: arAccount.id,
+          account_code: arAccount.account_code,
+          account_name: arAccount.account_name,
+          description: `Reduce AR for ${creditMemoNumber}`,
+          debit: 0,
+          credit: totalAmount,
+        },
+      ],
+    });
 
     await updateSalesInvoiceSettlementStatus(connection, salesReturn.sales_invoice_id);
 
@@ -1185,7 +1126,7 @@ export const createArCreditMemo = async (req, res) => {
   } catch (error) {
     await connection.rollback();
     console.error('Create AR credit memo error:', error);
-    res.status(500).json({ message: 'Failed to create AR credit memo' });
+    res.status(500).json({ message: error.message || 'Failed to create AR credit memo' });
   } finally {
     connection.release();
   }

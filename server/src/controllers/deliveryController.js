@@ -1,6 +1,7 @@
 import db from '../config/db.js';
 import { buildScopeWhereClause, requireDataScope } from '../middleware/dataScopeMiddleware.js';
 import { decreaseWarehouseStock } from '../utils/inventoryStock.js';
+import { createJournalEntry as createGLJournalEntry } from '../services/glPostingEngine.js';
 
 const round2 = (value) => Number(Number(value || 0).toFixed(2));
 
@@ -365,53 +366,71 @@ export const getDeliveryDashboardSummary = async (req, res) => {
 export const createSalesDelivery = async (req, res) => {
   const connection = await db.getConnection();
 
-  const updateSalesInvoiceDeliveryStatus = async (connection, salesInvoiceId) => {
-    const [[invoiceQtyRow]] = await connection.query(
-      `
-      SELECT COALESCE(SUM(quantity), 0) AS invoice_qty
-      FROM sales_invoice_items
-      WHERE sales_invoice_id = ?
-      `,
-      [salesInvoiceId, scope.company_id, scope.branch_id, scope.business_unit_id]
-    );
-
-    const [[deliveredQtyRow]] = await connection.query(
-      `
-      SELECT COALESCE(SUM(sdi.delivered_quantity), 0) AS delivered_qty
-      FROM sales_delivery_items sdi
-      INNER JOIN sales_deliveries sd
-        ON sd.id = sdi.sales_delivery_id
-      WHERE sd.sales_invoice_id = ?
-        AND sd.status = 'Posted'
-      `,
-      [salesInvoiceId]
-    );
-
-    const invoiceQty = Number(invoiceQtyRow?.invoice_qty || 0);
-    const deliveredQty = Number(deliveredQtyRow?.delivered_qty || 0);
-
-    let deliveryStatus = 'Not Delivered';
-
-    if (deliveredQty <= 0) {
-      deliveryStatus = 'Not Delivered';
-    } else if (deliveredQty < invoiceQty) {
-      deliveryStatus = 'Partial Delivered';
-    } else {
-      deliveryStatus = 'Fully Delivered';
-    }
-
-    await connection.query(
-      `
-      UPDATE sales_invoices
-      SET delivery_status = ?
-      WHERE id = ?
-      `,
-      [deliveryStatus, salesInvoiceId]
-    );
-  };
-
   try {
     const scope = requireDataScope(req);
+
+    const updateSalesInvoiceDeliveryStatus = async (conn, salesInvoiceId) => {
+      const [[invoiceQtyRow]] = await conn.query(
+        `
+        SELECT COALESCE(SUM(quantity), 0) AS invoice_qty
+        FROM sales_invoice_items
+        WHERE sales_invoice_id = ?
+        `,
+        [salesInvoiceId]
+      );
+
+      const [[deliveredQtyRow]] = await conn.query(
+        `
+        SELECT COALESCE(SUM(sdi.delivered_quantity), 0) AS delivered_qty
+        FROM sales_delivery_items sdi
+        INNER JOIN sales_deliveries sd
+          ON sd.id = sdi.sales_delivery_id
+        WHERE sd.sales_invoice_id = ?
+          AND sd.status = 'Posted'
+          AND sd.company_id = ?
+          AND sd.branch_id = ?
+          AND sd.business_unit_id = ?
+        `,
+        [
+          salesInvoiceId,
+          scope.company_id,
+          scope.branch_id,
+          scope.business_unit_id,
+        ]
+      );
+
+      const invoiceQty = Number(invoiceQtyRow?.invoice_qty || 0);
+      const deliveredQty = Number(deliveredQtyRow?.delivered_qty || 0);
+
+      let deliveryStatus = 'Not Delivered';
+
+      if (deliveredQty <= 0) {
+        deliveryStatus = 'Not Delivered';
+      } else if (deliveredQty < invoiceQty) {
+        deliveryStatus = 'Partial Delivered';
+      } else {
+        deliveryStatus = 'Fully Delivered';
+      }
+
+      await conn.query(
+        `
+        UPDATE sales_invoices
+        SET delivery_status = ?
+        WHERE id = ?
+          AND company_id = ?
+          AND branch_id = ?
+          AND business_unit_id = ?
+        `,
+        [
+          deliveryStatus,
+          salesInvoiceId,
+          scope.company_id,
+          scope.branch_id,
+          scope.business_unit_id,
+        ]
+      );
+    };
+
     await connection.beginTransaction();
 
     const {
@@ -446,7 +465,7 @@ export const createSalesDelivery = async (req, res) => {
         AND si.business_unit_id = ?
       LIMIT 1
       `,
-      [salesInvoiceId]
+      [salesInvoiceId, scope.company_id, scope.branch_id, scope.business_unit_id]
     );
 
     if (!invoice) {
@@ -524,9 +543,18 @@ export const createSalesDelivery = async (req, res) => {
           ON p.id = sii.product_id
         WHERE sii.id = ?
           AND sii.sales_invoice_id = ?
+          AND p.company_id = ?
+          AND p.branch_id = ?
+          AND p.business_unit_id = ?
         LIMIT 1
         `,
-        [salesInvoiceItemId, salesInvoiceId]
+        [
+          salesInvoiceItemId,
+          salesInvoiceId,
+          scope.company_id,
+          scope.branch_id,
+          scope.business_unit_id,
+        ]
       );
 
       if (!invoiceItem) {
@@ -544,8 +572,16 @@ export const createSalesDelivery = async (req, res) => {
           ON sd.id = sdi.sales_delivery_id
         WHERE sdi.sales_invoice_item_id = ?
           AND sd.status = 'Posted'
+          AND sd.company_id = ?
+          AND sd.branch_id = ?
+          AND sd.business_unit_id = ?
         `,
-        [salesInvoiceItemId]
+        [
+          salesInvoiceItemId,
+          scope.company_id,
+          scope.branch_id,
+          scope.business_unit_id,
+        ]
       );
 
       const alreadyDelivered = Number(deliveredRow?.delivered_quantity || 0);
@@ -568,9 +604,18 @@ export const createSalesDelivery = async (req, res) => {
         FROM inventory_stocks
         WHERE product_id = ?
           AND warehouse_id = ?
+          AND company_id = ?
+          AND branch_id = ?
+          AND business_unit_id = ?
         LIMIT 1
         `,
-        [invoiceItem.product_id, warehouseId]
+        [
+          invoiceItem.product_id,
+          warehouseId,
+          scope.company_id,
+          scope.branch_id,
+          scope.business_unit_id,
+        ]
       );
 
       if (!stockRow) {
@@ -718,77 +763,44 @@ export const createSalesDelivery = async (req, res) => {
       UPDATE sales_deliveries
       SET total_cost = ?
       WHERE id = ?
-      `,
-      [totalCost, salesDeliveryId]
-    );
-
-    const entryNumber = await getNextNumber('JE');
-
-    const [entryResult] = await connection.query(
-      `
-      INSERT INTO journal_entries
-      (
-        entry_number,
-        entry_date,
-        reference_type,
-        reference_id,
-        memo,
-        total_debit,
-        total_credit,
-        status,
-        company_id,
-        branch_id,
-        business_unit_id
-      )
-      VALUES (?, ?, 'Sales Delivery', ?, ?, ?, ?, 'Posted', ?, ?, ?)
+        AND company_id = ?
+        AND branch_id = ?
+        AND business_unit_id = ?
       `,
       [
-        entryNumber,
-        delivery_date,
+        totalCost,
         salesDeliveryId,
-        `COGS posting for ${deliveryNumber}`,
-        totalCost,
-        totalCost,
         scope.company_id,
         scope.branch_id,
         scope.business_unit_id,
       ]
     );
 
-    const journalEntryId = entryResult.insertId;
-
-    await connection.query(
-      `
-      INSERT INTO journal_entry_lines
-      (
-        journal_entry_id,
-        account_id,
-        account_code,
-        account_name,
-        description,
-        debit,
-        credit
-      )
-      VALUES
-      (?, ?, ?, ?, ?, ?, 0),
-      (?, ?, ?, ?, ?, 0, ?)
-      `,
-      [
-        journalEntryId,
-        cogsAccount.id,
-        cogsAccount.account_code,
-        cogsAccount.account_name,
-        `COGS for ${deliveryNumber}`,
-        totalCost,
-
-        journalEntryId,
-        inventoryAccount.id,
-        inventoryAccount.account_code,
-        inventoryAccount.account_name,
-        `Inventory reduction for ${deliveryNumber}`,
-        totalCost,
-      ]
-    );
+    await createGLJournalEntry(connection, {
+      entryDate: delivery_date,
+      referenceType: 'Sales Delivery',
+      referenceId: salesDeliveryId,
+      memo: `COGS posting for ${deliveryNumber}`,
+      scope,
+      lines: [
+        {
+          account_id: cogsAccount.id,
+          account_code: cogsAccount.account_code,
+          account_name: cogsAccount.account_name,
+          description: `COGS for ${deliveryNumber}`,
+          debit: totalCost,
+          credit: 0,
+        },
+        {
+          account_id: inventoryAccount.id,
+          account_code: inventoryAccount.account_code,
+          account_name: inventoryAccount.account_name,
+          description: `Inventory reduction for ${deliveryNumber}`,
+          debit: 0,
+          credit: totalCost,
+        },
+      ],
+    });
 
     await updateSalesInvoiceDeliveryStatus(connection, salesInvoiceId);
     await connection.commit();
@@ -820,7 +832,7 @@ export const createSalesDelivery = async (req, res) => {
   } catch (error) {
     await connection.rollback();
     console.error('Create sales delivery error:', error);
-    res.status(500).json({ message: 'Failed to create sales delivery' });
+    res.status(500).json({ message: error.message || 'Failed to create sales delivery' });
   } finally {
     connection.release();
   }

@@ -5,6 +5,7 @@ import {
   buildScopeWhereClause,
   requireDataScope,
 } from '../middleware/dataScopeMiddleware.js';
+import { createJournalEntry as createGLJournalEntry } from '../services/glPostingEngine.js';
 
 const round2 = (value) => Number(Number(value || 0).toFixed(2));
 
@@ -721,77 +722,34 @@ export const createSalesInvoice = async (req, res) => {
       );
     }
 
-    const entryNumber = await getNextNumber('JE');
-
-    const [entryResult] = await connection.query(
-      `
-      INSERT INTO journal_entries
-      (
-        entry_number,
-        entry_date,
-        reference_type,
-        reference_id,
-        memo,
-        total_debit,
-        total_credit,
-        status,
-        company_id,
-        branch_id,
-        business_unit_id
-      )
-      VALUES (?, ?, 'Sales Invoice', ?, ?, ?, ?, 'Posted', ?, ?, ?)
-      `,
-      [
-        entryNumber,
-        invoice_date,
-        salesInvoiceId,
-        `Sales invoice posting for ${invoiceNumber}`,
-        totalAmount,
-        totalAmount,
-        scope.company_id,
-        scope.branch_id,
-        scope.business_unit_id,
-      ]
-    );
-
-    const journalEntryId = entryResult.insertId;
-
-    await connection.query(
-      `
-      INSERT INTO journal_entry_lines
-      (
-        journal_entry_id,
-        account_id,
-        account_code,
-        account_name,
-        description,
-        debit,
-        credit
-      )
-      VALUES
-      (?, ?, ?, ?, ?, ?, 0),
-      (?, ?, ?, ?, ?, 0, ?)
-      `,
-      [
-        journalEntryId,
-        arAccount.id,
-        arAccount.account_code,
-        arAccount.account_name,
-        `AR for ${invoiceNumber}`,
-        totalAmount,
-
-        journalEntryId,
-        salesRevenueAccount.id,
-        salesRevenueAccount.account_code,
-        salesRevenueAccount.account_name,
-        `Revenue for ${invoiceNumber}`,
-        totalAmount,
-      ]
-    );
+    await createGLJournalEntry(connection, {
+      entryDate: invoice_date,
+      referenceType: 'Sales Invoice',
+      referenceId: salesInvoiceId,
+      memo: `Sales invoice posting for ${invoiceNumber}`,
+      scope,
+      lines: [
+        {
+          account_id: arAccount.id,
+          account_code: arAccount.account_code,
+          account_name: arAccount.account_name,
+          description: `AR for ${invoiceNumber}`,
+          debit: totalAmount,
+          credit: 0,
+        },
+        {
+          account_id: salesRevenueAccount.id,
+          account_code: salesRevenueAccount.account_code,
+          account_name: salesRevenueAccount.account_name,
+          description: `Revenue for ${invoiceNumber}`,
+          debit: 0,
+          credit: totalAmount,
+        },
+      ],
+    });
 
     await connection.commit();
 
-  
     try {
       await createAuditLog({
         userId: req.user?.id || null,
@@ -832,7 +790,7 @@ export const createSalesInvoice = async (req, res) => {
   } catch (error) {
     await connection.rollback();
     console.error('Create sales invoice error:', error);
-    res.status(500).json({ message: 'Failed to create sales invoice' });
+    res.status(500).json({ message: error.message || 'Failed to create sales invoice' });
   } finally {
     connection.release();
   }
@@ -1062,73 +1020,31 @@ export const createCustomerPayment = async (req, res) => {
       [newStatus, invoiceId]
     );
 
-    const entryNumber = await getNextNumber('JE');
-
-    const [entryResult] = await connection.query(
-      `
-      INSERT INTO journal_entries
-      (
-        entry_number,
-        entry_date,
-        reference_type,
-        reference_id,
-        memo,
-        total_debit,
-        total_credit,
-        status,
-        company_id,
-        branch_id,
-        business_unit_id
-      )
-      VALUES (?, ?, 'Customer Payment', ?, ?, ?, ?, 'Posted', ?, ?, ?)
-      `,
-      [
-        entryNumber,
-        payment_date,
-        paymentResult.insertId,
-        `Customer payment posting for ${paymentNumber}`,
-        paymentAmount,
-        paymentAmount,
-        scope.company_id,
-        scope.branch_id,
-        scope.business_unit_id,
-      ]
-    );
-
-    const journalEntryId = entryResult.insertId;
-
-    await connection.query(
-      `
-      INSERT INTO journal_entry_lines
-      (
-        journal_entry_id,
-        account_id,
-        account_code,
-        account_name,
-        description,
-        debit,
-        credit
-      )
-      VALUES
-      (?, ?, ?, ?, ?, ?, 0),
-      (?, ?, ?, ?, ?, 0, ?)
-      `,
-      [
-        journalEntryId,
-        cashAccount.id,
-        cashAccount.account_code,
-        cashAccount.account_name,
-        `Cash receipt for ${paymentNumber}`,
-        paymentAmount,
-
-        journalEntryId,
-        arAccount.id,
-        arAccount.account_code,
-        arAccount.account_name,
-        `AR settlement for ${paymentNumber}`,
-        paymentAmount,
-      ]
-    );
+    await createGLJournalEntry(connection, {
+      entryDate: payment_date,
+      referenceType: 'Customer Payment',
+      referenceId: paymentResult.insertId,
+      memo: `Customer payment posting for ${paymentNumber}`,
+      scope,
+      lines: [
+        {
+          account_id: cashAccount.id,
+          account_code: cashAccount.account_code,
+          account_name: cashAccount.account_name,
+          description: `Cash receipt for ${paymentNumber}`,
+          debit: paymentAmount,
+          credit: 0,
+        },
+        {
+          account_id: arAccount.id,
+          account_code: arAccount.account_code,
+          account_name: arAccount.account_name,
+          description: `AR settlement for ${paymentNumber}`,
+          debit: 0,
+          credit: paymentAmount,
+        },
+      ],
+    });
 
     await connection.commit();
 
@@ -1183,7 +1099,7 @@ export const createCustomerPayment = async (req, res) => {
   } catch (error) {
     await connection.rollback();
     console.error('Create customer payment error:', error);
-    res.status(500).json({ message: 'Failed to create customer payment' });
+    res.status(500).json({ message: error.message || 'Failed to create customer payment' });
   } finally {
     connection.release();
   }

@@ -1,33 +1,21 @@
 import db from '../config/db.js';
 import { ACCOUNT_CODES } from '../constants/accountCodes.js';
-
-/**
- * Full GL Posting Engine
- * ---------------------------------------------------------
- * Centralized posting layer for:
- * - AP Invoice
- * - AP Payment
- * - Sales Invoice
- * - Sales Delivery (COGS)
- * - AR Payment
- * - AR Credit Memo
- * - Customer Refund
- * - Inventory Adjustment
- * - Generic Journal Entry
- * - Journal Reversal
- *
- * Notes:
- * - Built to match your current schema:
- *   journal_entries, journal_entry_lines, chart_of_accounts,
- *   accounting_periods, ap_invoices, ap_payments,
- *   sales_invoices, ar_payments, ar_credit_memos, customer_refunds,
- *   inventory_adjustments
- * - Uses accounting period lock validation
- * - Prevents duplicate posting per reference_type + reference_id
- * - Supports transactional usage by accepting an existing connection
- */
+import { assertPostingDateAllowed } from './accountingPeriodService.js';
 
 const round2 = (value) => Number(Number(value || 0).toFixed(2));
+
+const normalizeScope = (scope = {}) => ({
+  company_id: scope?.company_id ?? null,
+  branch_id: scope?.branch_id ?? null,
+  business_unit_id: scope?.business_unit_id ?? null,
+});
+
+const scopeFromJournalEntry = (entry = {}) =>
+  normalizeScope({
+    company_id: entry.company_id,
+    branch_id: entry.branch_id,
+    business_unit_id: entry.business_unit_id,
+  });
 
 const DEFAULT_CODES = {
   CASH: ACCOUNT_CODES?.CASH_IN_BANK || '1000',
@@ -122,30 +110,15 @@ export async function getAccountsByCodes(connection, accountCodes = []) {
   return map;
 }
 
-export async function assertPostingDateOpen(connection, postingDate) {
+export async function assertPostingDateOpen(connection, postingDate, options = {}) {
   if (!postingDate) {
     throw new Error('Posting date is required');
   }
 
-  const [[period]] = await connection.query(
-    `
-    SELECT id, period_code, status
-    FROM accounting_periods
-    WHERE ? BETWEEN start_date AND end_date
-    LIMIT 1
-    `,
-    [postingDate]
-  );
-
-  if (!period) {
-    throw new Error(`No accounting period found for posting date ${postingDate}`);
-  }
-
-  if (period.status === 'Hard Closed') {
-    throw new Error(`Accounting period ${period.period_code} is hard closed`);
-  }
-
-  return period;
+  return assertPostingDateAllowed(connection, postingDate, {
+    allowSoftClosedForAdmin: options.allowSoftClosedForAdmin ?? false,
+    userRole: options.userRole || '',
+  });
 }
 
 function normalizeJournalLines(lines = []) {
@@ -268,9 +241,15 @@ export async function createJournalEntry(
     lines = [],
     status = 'Posted',
     allowDuplicateReference = false,
+    scope = null,
+    allowSoftClosedForAdmin = false,
+    userRole = '',
   }
 ) {
-  await assertPostingDateOpen(connection, entryDate);
+  await assertPostingDateOpen(connection, entryDate, {
+    allowSoftClosedForAdmin,
+    userRole,
+  });
 
   if (!allowDuplicateReference && referenceType && referenceId) {
     const existing = await getExistingPostedEntryByReference(
@@ -287,7 +266,7 @@ export async function createJournalEntry(
   }
 
   const normalized = normalizeJournalLines(lines);
-
+  const normalizedScope = normalizeScope(scope);
   const entryNumber = buildEntryNumber('JE');
 
   const [headerResult] = await connection.query(
@@ -301,9 +280,12 @@ export async function createJournalEntry(
       memo,
       total_debit,
       total_credit,
-      status
+      status,
+      company_id,
+      branch_id,
+      business_unit_id
     )
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     `,
     [
       entryNumber,
@@ -314,6 +296,9 @@ export async function createJournalEntry(
       normalized.totalDebit,
       normalized.totalCredit,
       status,
+      normalizedScope.company_id,
+      normalizedScope.branch_id,
+      normalizedScope.business_unit_id,
     ]
   );
 
@@ -423,6 +408,7 @@ export async function reverseJournalEntry(
       `Reversal of ${originalEntry.entry_number}${originalEntry.memo ? ` - ${originalEntry.memo}` : ''}`,
     lines: reversedLines,
     allowDuplicateReference: true,
+    scope: scopeFromJournalEntry(originalEntry),
   });
 
   await connection.query(

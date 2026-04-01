@@ -5,13 +5,12 @@ import {
   updateInventoryStockSnapshot,
 } from './inventoryCostingService.js';
 import { insertInventoryLedger } from './inventoryLedgerService.js';
-import { createJournalEntry, getAccountByCode } from './journalPostingService.js';
-import { ACCOUNT_CODES } from '../constants/accountCodes.js';
 import {
   assertDocumentStatus,
   assertLinesExist,
   assertStockAvailable,
 } from './postingValidationService.js';
+import { postSalesDeliveryGL } from './glPostingEngine.js';
 
 export const postSalesDelivery = async ({ salesDeliveryId, userId }) => {
   return withTransaction(async (connection) => {
@@ -49,11 +48,7 @@ export const postSalesDelivery = async ({ salesDeliveryId, userId }) => {
         delivery.warehouse_id
       );
 
-      assertStockAvailable({
-        availableQty: stockRow.quantity,
-        requestedQty: line.delivered_quantity,
-        productName: line.product_name,
-      });
+      assertStockAvailable(stockRow.quantity, line.delivered_quantity, line.product_name);
 
       const costing = calculateIssueAtAverage({
         currentQty: stockRow.quantity,
@@ -61,7 +56,7 @@ export const postSalesDelivery = async ({ salesDeliveryId, userId }) => {
         issueQty: line.delivered_quantity,
       });
 
-      totalCogs += Number(costing.issueValue);
+      totalCogs += Number(costing.issueValue || 0);
 
       await updateInventoryStockSnapshot(connection, stockRow.id, {
         quantity: costing.qtyAfter,
@@ -110,32 +105,10 @@ export const postSalesDelivery = async ({ salesDeliveryId, userId }) => {
       [salesDeliveryId]
     );
 
-    const cogsAccount = await getAccountByCode(connection, ACCOUNT_CODES.COST_OF_GOODS_SOLD);
-    const inventoryAccount = await getAccountByCode(connection, ACCOUNT_CODES.INVENTORY_ASSET);
-
-    await createJournalEntry(connection, {
-      entryDate: delivery.delivery_date,
-      referenceType: 'SalesDelivery',
-      referenceId: delivery.id,
-      memo: `COGS posting for sales delivery ${delivery.delivery_number}`,
-      lines: [
-        {
-          account_id: cogsAccount.id,
-          account_code: cogsAccount.account_code,
-          account_name: cogsAccount.account_name,
-          description: 'Cost of goods sold',
-          debit: totalCogs,
-          credit: 0,
-        },
-        {
-          account_id: inventoryAccount.id,
-          account_code: inventoryAccount.account_code,
-          account_name: inventoryAccount.account_name,
-          description: 'Inventory asset reduction',
-          debit: 0,
-          credit: totalCogs,
-        },
-      ],
+    await postSalesDeliveryGL({
+      salesDeliveryId: delivery.id,
+      totalCogs,
+      connection,
     });
 
     return { message: 'Sales Delivery posted successfully' };

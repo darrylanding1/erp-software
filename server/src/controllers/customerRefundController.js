@@ -4,6 +4,7 @@ import {
   buildScopeWhereClause,
   requireDataScope,
 } from '../middleware/dataScopeMiddleware.js';
+import { createJournalEntry as createGLJournalEntry } from '../services/glPostingEngine.js';
 
 const round2 = (value) => Number(Number(value || 0).toFixed(2));
 
@@ -239,6 +240,9 @@ export const createCustomerRefund = async (req, res) => {
         si.invoice_number,
         si.total_amount AS invoice_total,
         c.name AS customer_name,
+        c.company_id,
+        c.branch_id,
+        c.business_unit_id,
         COALESCE((
           SELECT SUM(cp.amount_paid)
           FROM customer_payments cp
@@ -275,7 +279,9 @@ export const createCustomerRefund = async (req, res) => {
     const totalRefunded = round2(creditMemo.total_refunded);
 
     const overpaymentOrCredit = round2(totalPaid + totalCreditMemo - invoiceTotal);
-    const refundableAmount = round2(Math.min(totalCreditMemo, Math.max(overpaymentOrCredit, 0)) - totalRefunded);
+    const refundableAmount = round2(
+      Math.min(totalCreditMemo, Math.max(overpaymentOrCredit, 0)) - totalRefunded
+    );
 
     if (refundableAmount <= 0) {
       await connection.rollback();
@@ -340,73 +346,31 @@ export const createCustomerRefund = async (req, res) => {
       ]
     );
 
-    const entryNumber = await getNextNumber('JE');
-
-    const [entryResult] = await connection.query(
-      `
-      INSERT INTO journal_entries
-      (
-        entry_number,
-        entry_date,
-        reference_type,
-        reference_id,
-        memo,
-        total_debit,
-        total_credit,
-        status,
-        company_id,
-        branch_id,
-        business_unit_id
-      )
-      VALUES (?, ?, 'Customer Refund', ?, ?, ?, ?, 'Posted', ?, ?, ?)
-      `,
-      [
-        entryNumber,
-        refund_date,
-        refundResult.insertId,
-        `Customer refund for ${refundNumber}`,
-        refundAmount,
-        refundAmount,
-        scope.company_id,
-        scope.branch_id,
-        scope.business_unit_id,
-      ]
-    );
-
-    const journalEntryId = entryResult.insertId;
-
-    await connection.query(
-      `
-      INSERT INTO journal_entry_lines
-      (
-        journal_entry_id,
-        account_id,
-        account_code,
-        account_name,
-        description,
-        debit,
-        credit
-      )
-      VALUES
-      (?, ?, ?, ?, ?, ?, 0),
-      (?, ?, ?, ?, ?, 0, ?)
-      `,
-      [
-        journalEntryId,
-        arAccount.id,
-        arAccount.account_code,
-        arAccount.account_name,
-        `Clear customer credit for ${refundNumber}`,
-        refundAmount,
-
-        journalEntryId,
-        cashAccount.id,
-        cashAccount.account_code,
-        cashAccount.account_name,
-        `Cash out for ${refundNumber}`,
-        refundAmount,
-      ]
-    );
+    await createGLJournalEntry(connection, {
+      entryDate: refund_date,
+      referenceType: 'Customer Refund',
+      referenceId: refundResult.insertId,
+      memo: `Customer refund for ${refundNumber}`,
+      scope,
+      lines: [
+        {
+          account_id: arAccount.id,
+          account_code: arAccount.account_code,
+          account_name: arAccount.account_name,
+          description: `Clear customer credit for ${refundNumber}`,
+          debit: refundAmount,
+          credit: 0,
+        },
+        {
+          account_id: cashAccount.id,
+          account_code: cashAccount.account_code,
+          account_name: cashAccount.account_name,
+          description: `Cash out for ${refundNumber}`,
+          debit: 0,
+          credit: refundAmount,
+        },
+      ],
+    });
 
     await connection.commit();
 
@@ -433,7 +397,7 @@ export const createCustomerRefund = async (req, res) => {
   } catch (error) {
     await connection.rollback();
     console.error('Create customer refund error:', error);
-    res.status(500).json({ message: 'Failed to create customer refund' });
+    res.status(500).json({ message: error.message || 'Failed to create customer refund' });
   } finally {
     connection.release();
   }
