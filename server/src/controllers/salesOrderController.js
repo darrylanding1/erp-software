@@ -34,14 +34,12 @@ const getSalesOrderInvoiceStatus = async (connection, salesOrderId) => {
 export const getSalesOrderMeta = async (req, res) => {
   try {
     const scope = requireDataScope(req);
+
     const [customers] = await db.query(
       `
       SELECT id, customer_code, name, status
       FROM customers
       WHERE status = 'Active'
-        AND company_id = ?
-        AND branch_id = ?
-        AND business_unit_id = ?
         AND company_id = ?
         AND branch_id = ?
         AND business_unit_id = ?
@@ -55,6 +53,9 @@ export const getSalesOrderMeta = async (req, res) => {
       SELECT id, name, code, address, status
       FROM warehouses
       WHERE status = 'Active'
+        AND company_id = ?
+        AND branch_id = ?
+        AND business_unit_id = ?
       ORDER BY name ASC
       `,
       [scope.company_id, scope.branch_id, scope.business_unit_id]

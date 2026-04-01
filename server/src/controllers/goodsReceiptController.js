@@ -16,12 +16,24 @@ const buildPurchaseOrderScope = (scope, alias = 'po') =>
     businessUnit: `${alias}.business_unit_id`,
   });
 
-const buildGoodsReceiptScope = (scope, alias = 'gr') =>
-  buildScopeWhereClause(scope, {
-    company: `${alias}.company_id`,
-    branch: `${alias}.branch_id`,
-    businessUnit: `${alias}.business_unit_id`,
+const buildGoodsReceiptScope = (scope, _legacyAlias = 'gr', purchaseOrderAlias = 'po', warehouseAlias = 'w') => {
+  const poScope = buildScopeWhereClause(scope, {
+    company: `${purchaseOrderAlias}.company_id`,
+    branch: `${purchaseOrderAlias}.branch_id`,
+    businessUnit: `${purchaseOrderAlias}.business_unit_id`,
   });
+
+  const warehouseScope = buildScopeWhereClause(scope, {
+    company: `${warehouseAlias}.company_id`,
+    branch: `${warehouseAlias}.branch_id`,
+    businessUnit: `${warehouseAlias}.business_unit_id`,
+  });
+
+  return {
+    sql: `${poScope.sql}${warehouseScope.sql}`,
+    values: [...poScope.values, ...warehouseScope.values],
+  };
+};
 
 const assertWarehouseInScope = async (connection, warehouseId, scope) => {
   const warehouseScope = buildWarehouseScope(scope, 'w');
@@ -479,6 +491,8 @@ export const getGoodsReceipts = async (req, res) => {
       status = '',
     } = req.query;
 
+    const goodsReceiptScope = buildGoodsReceiptScope(scope);
+
     let sql = `
       SELECT
         gr.*,
@@ -493,9 +507,9 @@ export const getGoodsReceipts = async (req, res) => {
       INNER JOIN purchase_orders po ON gr.purchase_order_id = po.id
       INNER JOIN suppliers s ON po.supplier_id = s.id
       INNER JOIN warehouses w ON gr.warehouse_id = w.id
-      WHERE 1 = 1 ${buildGoodsReceiptScope(scope, 'gr').sql}
+      WHERE 1 = 1 ${goodsReceiptScope.sql}
     `;
-    const values = [...buildGoodsReceiptScope(scope, 'gr').values];
+    const values = [...goodsReceiptScope.values];
 
     if (warehouse_id) {
       sql += ` AND gr.warehouse_id = ?`;
@@ -537,6 +551,7 @@ export const getGoodsReceiptById = async (req, res) => {
   try {
     const scope = requireDataScope(req);
     const { id } = req.params;
+    const goodsReceiptScope = buildGoodsReceiptScope(scope);
 
     const [headerRows] = await db.query(
       `
@@ -554,9 +569,9 @@ export const getGoodsReceiptById = async (req, res) => {
       INNER JOIN purchase_orders po ON gr.purchase_order_id = po.id
       INNER JOIN suppliers s ON po.supplier_id = s.id
       INNER JOIN warehouses w ON gr.warehouse_id = w.id
-      WHERE gr.id = ? ${buildGoodsReceiptScope(scope, 'gr').sql}
+      WHERE gr.id = ? ${goodsReceiptScope.sql}
       `,
-      [id, ...buildGoodsReceiptScope(scope, 'gr').values]
+      [id, ...goodsReceiptScope.values]
     );
 
     if (headerRows.length === 0) {
@@ -959,7 +974,7 @@ export const createGoodsReceipt = async (req, res) => {
       INNER JOIN purchase_orders po ON gr.purchase_order_id = po.id
       INNER JOIN suppliers s ON po.supplier_id = s.id
       INNER JOIN warehouses w ON gr.warehouse_id = w.id
-      WHERE gr.id = ?
+      WHERE gr.id = ? ${buildGoodsReceiptScope(scope).sql}
       `,
       [goodsReceiptId, ...buildGoodsReceiptScope(scope).values]
     );
