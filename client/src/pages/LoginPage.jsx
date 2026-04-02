@@ -5,7 +5,6 @@ export default function LoginPage() {
   const { login } = useAuth();
   const [loading, setLoading] = useState(false);
 
-  // 🔒 Fixed credentials
   const email = "admin@inventorypro.local";
   const password = "Admin@123";
 
@@ -14,9 +13,11 @@ export default function LoginPage() {
     setLoading(true);
 
     try {
+      // Always login using fixed credentials
       await login(email, password);
     } catch (error) {
       console.error("Login failed:", error);
+      alert("Login failed. Please check server.");
     } finally {
       setLoading(false);
     }
@@ -28,8 +29,8 @@ export default function LoginPage() {
         onSubmit={handleSubmit}
         className="bg-white p-6 rounded-lg shadow-md w-96"
       >
-        <h2 className="text-2xl font-bold mb-4 text-center">
-          System Login
+        <h2 className="text-2xl font-bold mb-6 text-center">
+          Login to System
         </h2>
 
         {/* EMAIL */}
@@ -46,7 +47,7 @@ export default function LoginPage() {
         </div>
 
         {/* PASSWORD */}
-        <div className="mb-4">
+        <div className="mb-6">
           <label className="block text-sm font-medium mb-1">
             Password
           </label>
