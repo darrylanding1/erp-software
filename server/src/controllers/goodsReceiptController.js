@@ -1,6 +1,7 @@
 import db from '../config/db.js';
 import { buildScopeWhereClause, requireDataScope } from '../middleware/dataScopeMiddleware.js';
-
+import { applyGoodsReceiptInventoryImpact } from '../services/goodsReceiptPostingService.js';
+import { normalizePurchaseLine, normalizeReceiptLine } from '../utils/itemMasterResolvers.js';
 
 const buildWarehouseScope = (scope, alias = 'w') =>
   buildScopeWhereClause(scope, {
@@ -64,6 +65,151 @@ const getStockStatus = (quantity) => {
   if (qty <= 0) return 'Out of Stock';
   if (qty <= 10) return 'Low Stock';
   return 'In Stock';
+};
+
+const normalizeReceiptSerialNumbers = (value) => {
+  if (!value) return [];
+
+  let parsed = value;
+
+  if (typeof value === 'string') {
+    try {
+      parsed = JSON.parse(value);
+    } catch {
+      parsed = value
+        .split(/\r?\n|,|;/)
+        .map((item) => item.trim())
+        .filter(Boolean);
+    }
+  }
+
+  if (!Array.isArray(parsed)) {
+    throw new Error('serial_numbers_json must be a valid JSON array');
+  }
+
+  return [...new Set(parsed.map((item) => String(item || '').trim()).filter(Boolean))];
+};
+
+const mapReceiptItemInput = (item) => ({
+  purchase_order_item_id: Number(item.purchase_order_item_id),
+  received_quantity: Number(item.received_quantity),
+  uom_code: item.uom_code ? String(item.uom_code).trim() : null,
+  vendor_sku: item.vendor_sku ? String(item.vendor_sku).trim() : null,
+  lot_number: item.lot_number ? String(item.lot_number).trim() : null,
+  expiry_date: item.expiry_date || null,
+  serial_numbers_json: normalizeReceiptSerialNumbers(item.serial_numbers_json),
+});
+
+const getProductById = async (connection, productId, scope) => {
+  const productScope = buildScopeWhereClause(scope, {
+    company: 'p.company_id',
+    branch: 'p.branch_id',
+    businessUnit: 'p.business_unit_id',
+  });
+
+  const [rows] = await connection.query(
+    `
+    SELECT
+      p.id,
+      p.name,
+      p.sku,
+      p.uom,
+      p.alternate_uoms_json,
+      p.vendor_item_mappings_json,
+      p.inventory_tracking_type,
+      p.is_lot_tracked,
+      p.is_serial_tracked,
+      p.is_expiry_tracked,
+      p.standard_cost
+    FROM products p
+    WHERE p.id = ? ${productScope.sql}
+    LIMIT 1
+    `,
+    [Number(productId), ...productScope.values]
+  );
+
+  return rows[0] || null;
+};
+
+const createInventoryMovement = async (connection, movement) => {
+  const {
+    movement_date,
+    product_id,
+    warehouse_id,
+    reference_type,
+    reference_id,
+    reference_line_id,
+    movement_type,
+    direction,
+    requested_uom_code,
+    base_uom_code,
+    conversion_factor,
+    requested_quantity,
+    base_quantity,
+    unit_cost,
+    total_cost,
+    lot_number,
+    expiry_date,
+    serial_numbers_json,
+    scope,
+  } = movement;
+
+  await connection.query(
+    `
+    INSERT INTO stock_movements
+    (
+      product_id,
+      warehouse_id,
+      movement_type,
+      reference_type,
+      reference_id,
+      reference_line_id,
+      direction,
+      quantity,
+      requested_uom_code,
+      base_uom_code,
+      conversion_factor,
+      requested_quantity,
+      base_quantity,
+      unit_cost,
+      total_cost,
+      movement_date,
+      lot_number,
+      expiry_date,
+      serial_numbers_json,
+      company_id,
+      branch_id,
+      business_unit_id,
+      note
+    )
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    `,
+    [
+      Number(product_id),
+      Number(warehouse_id),
+      movement_type,
+      reference_type,
+      Number(reference_id),
+      reference_line_id ? Number(reference_line_id) : null,
+      direction,
+      Number(base_quantity) || 0,
+      requested_uom_code || null,
+      base_uom_code || null,
+      Number(conversion_factor) || 1,
+      Number(requested_quantity) || 0,
+      Number(base_quantity) || 0,
+      Number(unit_cost) || 0,
+      Number(total_cost) || 0,
+      movement_date,
+      lot_number || null,
+      expiry_date || null,
+      JSON.stringify(serial_numbers_json || []),
+      scope.company_id || null,
+      scope.branch_id || null,
+      scope.business_unit_id || null,
+      `${reference_type} ${reference_id}`,
+    ]
+  );
 };
 
 const ensureInventoryRow = async (connection, productId, warehouseId) => {
@@ -345,6 +491,10 @@ export const getGoodsReceiptSuggestions = async (req, res) => {
         poi.requested_warehouse_id,
         p.name AS product_name,
         p.sku,
+        p.inventory_tracking_type,
+        p.is_lot_tracked,
+        p.is_serial_tracked,
+        p.is_expiry_tracked,
         w.name AS warehouse_name,
         w.code AS warehouse_code
       FROM purchase_order_items poi
@@ -454,6 +604,10 @@ export const getPurchaseOrderForReceipt = async (req, res) => {
         poi.line_total,
         p.name AS product_name,
         p.sku,
+        p.inventory_tracking_type,
+        p.is_lot_tracked,
+        p.is_serial_tracked,
+        p.is_expiry_tracked,
         w.name AS requested_warehouse_name,
         w.code AS requested_warehouse_code
       FROM purchase_order_items poi
@@ -584,6 +738,7 @@ export const getGoodsReceiptById = async (req, res) => {
         gri.*,
         p.name AS product_name,
         p.sku,
+        p.uom,
         rw.name AS requested_warehouse_name,
         rw.code AS requested_warehouse_code
       FROM goods_receipt_items gri
@@ -595,13 +750,20 @@ export const getGoodsReceiptById = async (req, res) => {
       [id]
     );
 
+    const normalizedItems = itemRows.map((row) => ({
+      ...row,
+      serial_numbers_json: normalizeReceiptSerialNumbers(row.serial_numbers_json),
+    }));
+
     res.json({
       ...headerRows[0],
-      items: itemRows,
+      items: normalizedItems,
     });
   } catch (error) {
     console.error('Get goods receipt by id error:', error);
-    res.status(error.statusCode || 500).json({ message: error.message || 'Failed to fetch goods receipt details' });
+    res
+      .status(error.statusCode || 500)
+      .json({ message: error.message || 'Failed to fetch goods receipt details' });
   }
 };
 
@@ -630,14 +792,16 @@ export const createGoodsReceipt = async (req, res) => {
       return res.status(400).json({ message: 'Invalid goods receipt data' });
     }
 
+    const poScope = buildPurchaseOrderScope(scope);
+
     const [poRows] = await connection.query(
       `
       SELECT *
       FROM purchase_orders
-      WHERE id = ? ${buildPurchaseOrderScope(scope).sql}
+      WHERE id = ? ${poScope.sql}
       FOR UPDATE
       `,
-      [purchaseOrderId, ...buildPurchaseOrderScope(scope).values]
+      [purchaseOrderId, ...poScope.values]
     );
 
     if (poRows.length === 0) {
@@ -664,7 +828,14 @@ export const createGoodsReceipt = async (req, res) => {
       SELECT
         poi.*,
         p.name AS product_name,
-        p.sku
+        p.sku,
+        p.uom,
+        p.alternate_uoms_json,
+        p.vendor_item_mappings_json,
+        p.inventory_tracking_type,
+        p.is_lot_tracked,
+        p.is_serial_tracked,
+        p.is_expiry_tracked
       FROM purchase_order_items poi
       INNER JOIN products p ON poi.product_id = p.id
       WHERE poi.purchase_order_id = ?
@@ -702,6 +873,11 @@ export const createGoodsReceipt = async (req, res) => {
           return {
             purchase_order_item_id: Number(item.id),
             received_quantity: remaining,
+            uom_code: item.requested_uom_code || item.uom || null,
+            vendor_sku: item.vendor_sku || null,
+            lot_number: null,
+            expiry_date: null,
+            serial_numbers_json: [],
           };
         })
         .filter(Boolean);
@@ -712,10 +888,7 @@ export const createGoodsReceipt = async (req, res) => {
       }
 
       receiptItems = items
-        .map((item) => ({
-          purchase_order_item_id: Number(item.purchase_order_item_id),
-          received_quantity: Number(item.received_quantity),
-        }))
+        .map(mapReceiptItemInput)
         .filter(
           (item) =>
             item.purchase_order_item_id > 0 &&
@@ -723,7 +896,41 @@ export const createGoodsReceipt = async (req, res) => {
         );
     }
 
-    if (receiptItems.length === 0) {
+    const normalizedReceiptItems = [];
+
+    for (const item of receiptItems) {
+      const poItem = poItemMap.get(Number(item.purchase_order_item_id));
+
+      if (!poItem) {
+        throw new Error(`PO item not found: ${item.purchase_order_item_id}`);
+      }
+
+      const product = await getProductById(connection, poItem.product_id, scope);
+      if (!product) {
+        throw new Error(`Product not found: ${poItem.product_id}`);
+      }
+
+      const normalized = normalizePurchaseLine({
+        item,
+        product,
+        supplierId: Number(purchaseOrder.supplier_id),
+        quantity: item.received_quantity,
+        unitCost: poItem.requested_unit_cost || poItem.unit_cost,
+        vendorSku: item.vendor_sku || poItem.vendor_sku,
+        uomCode: item.uom_code || poItem.requested_uom_code || poItem.uom_code || poItem.uom,
+      });
+
+      normalizedReceiptItems.push({
+        ...normalized,
+        purchase_order_item_id: Number(poItem.id),
+        product_id: Number(normalized.product_id || poItem.product_id),
+        lot_number: item.lot_number || null,
+        expiry_date: item.expiry_date || null,
+        serial_numbers_json: item.serial_numbers_json || [],
+      });
+    }
+
+    if (normalizedReceiptItems.length === 0) {
       await connection.rollback();
       return res.status(400).json({
         message:
@@ -752,7 +959,7 @@ export const createGoodsReceipt = async (req, res) => {
         });
       }
 
-      if (item.received_quantity > pendingQty) {
+      if (Number(item.base_quantity) > pendingQty) {
         await connection.rollback();
         return res.status(400).json({
           message: `${poItem.product_name} receipt exceeds pending quantity`,
@@ -768,10 +975,33 @@ export const createGoodsReceipt = async (req, res) => {
           message: `${poItem.product_name} is assigned to a different requested warehouse`,
         });
       }
+
+      if ((poItem.is_lot_tracked || poItem.inventory_tracking_type === 'LOT') && !item.lot_number) {
+        await connection.rollback();
+        return res.status(400).json({
+          message: `${poItem.product_name} requires lot_number`,
+        });
+      }
+
+      if (poItem.is_expiry_tracked && !item.expiry_date) {
+        await connection.rollback();
+        return res.status(400).json({
+          message: `${poItem.product_name} requires expiry_date`,
+        });
+      }
+
+      if (
+        (poItem.is_serial_tracked || poItem.inventory_tracking_type === 'SERIAL') &&
+        item.serial_numbers_json.length !== Number(item.requested_quantity)
+      ) {
+        await connection.rollback();
+        return res.status(400).json({
+          message: `${poItem.product_name} serial count must match received quantity`,
+        });
+      }
     }
 
     const grNumber = `GR-${Date.now()}`;
-
     const initialStatus = auto_post ? 'Posted' : 'Draft';
 
     const [grResult] = await connection.query(
@@ -810,12 +1040,12 @@ export const createGoodsReceipt = async (req, res) => {
     const goodsReceiptId = grResult.insertId;
     const touchedProductIds = new Set();
 
-    for (const item of receiptItems) {
+    for (const item of normalizedReceiptItems) {
       const poItem = poItemMap.get(item.purchase_order_item_id);
-      const productId = Number(poItem.product_id);
-      const qty = Number(item.received_quantity);
-      const unitCost = Number(poItem.unit_cost) || 0;
-      const lineTotal = qty * unitCost;
+      const productId = Number(item.product_id || poItem.product_id);
+      const requestedQty = Number(item.requested_quantity) || 0;
+      const baseQty = Number(item.base_quantity) || 0;
+      const baseUnitCost = Number(item.base_unit_cost || 0);
 
       const orderedQty = Number(poItem.quantity) || 0;
       const alreadyReceivedQty = Number(poItem.received_quantity) || 0;
@@ -830,25 +1060,47 @@ export const createGoodsReceipt = async (req, res) => {
           purchase_requisition_item_id,
           product_id,
           requested_warehouse_id,
+          vendor_sku,
+          requested_uom_code,
+          base_uom_code,
+          conversion_factor,
+          requested_received_quantity,
+          base_received_quantity,
           received_quantity,
           remaining_po_quantity,
           suggested_receipt_quantity,
+          requested_unit_cost,
+          base_unit_cost,
           unit_cost,
-          line_total
+          line_total,
+          lot_number,
+          expiry_date,
+          serial_numbers_json
         )
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         `,
         [
           goodsReceiptId,
-          poItem.id,
+          item.purchase_order_item_id,
           poItem.purchase_requisition_item_id || null,
           productId,
           poItem.requested_warehouse_id || null,
-          qty,
+          item.vendor_sku,
+          item.requested_uom_code,
+          item.base_uom_code,
+          item.conversion_factor,
+          requestedQty,
+          baseQty,
+          baseQty,
           remainingPoQty,
           remainingPoQty,
-          unitCost,
-          lineTotal,
+          item.requested_unit_cost,
+          item.base_unit_cost,
+          item.base_unit_cost,
+          requestedQty * Number(item.requested_unit_cost || 0),
+          item.lot_number,
+          item.expiry_date,
+          JSON.stringify(item.serial_numbers_json || []),
         ]
       );
 
@@ -858,62 +1110,56 @@ export const createGoodsReceipt = async (req, res) => {
         SET received_quantity = received_quantity + ?
         WHERE id = ?
         `,
-        [qty, poItem.id]
+        [baseQty, poItem.id]
       );
 
-      const stockState = await syncInventoryValuation(
+      await applyGoodsReceiptInventoryImpact({
         connection,
-        productId,
-        warehouseId,
-        qty,
-        unitCost
-      );
-
-      await connection.query(
-        `
-        INSERT INTO stock_movements
-        (
-          product_id,
-          warehouse_id,
-          movement_type,
-          reference_type,
-          reference_id,
-          quantity,
-          previous_quantity,
-          new_quantity,
-          note,
-          company_id,
-          branch_id,
-          business_unit_id
-        )
-        VALUES (?, ?, 'Restock', 'Goods Receipt', ?, ?, ?, ?, ?, ?, ?, ?)
-        `,
-        [
-          productId,
-          warehouseId,
-          goodsReceiptId,
-          qty,
-          stockState.previousQty,
-          stockState.newQty,
-          `${grNumber} from PO ${purchaseOrder.po_number}`,
-          scope.company_id,
-          scope.branch_id,
-          scope.business_unit_id,
-        ]
-      );
-
-      await insertInventoryLedgerEntry({
-        connection,
-        receiptDate: receipt_date,
-        goodsReceiptId,
-        goodsReceiptItemId: griResult.insertId,
-        productId,
-        warehouseId,
-        quantity: qty,
-        unitCost,
-        stockState,
-        remarks: `${grNumber} from PO ${purchaseOrder.po_number}`,
+        receipt: {
+          id: goodsReceiptId,
+          gr_number: grNumber,
+          receipt_date,
+          warehouse_id: warehouseId,
+        },
+        line: {
+          id: griResult.insertId,
+          goods_receipt_id: goodsReceiptId,
+          product_id: productId,
+          product_name: poItem.product_name,
+          sku: poItem.sku,
+          received_quantity: baseQty,
+          unit_cost: baseUnitCost,
+          lot_number: item.lot_number,
+          expiry_date: item.expiry_date,
+          serial_numbers_json: item.serial_numbers_json,
+          inventory_tracking_type: poItem.inventory_tracking_type,
+          is_lot_tracked: poItem.is_lot_tracked,
+          is_serial_tracked: poItem.is_serial_tracked,
+          is_expiry_tracked: poItem.is_expiry_tracked,
+        },
         userId: req.user?.id || null,
+      });
+
+      await createInventoryMovement(connection, {
+        movement_date: receipt_date,
+        product_id: productId,
+        warehouse_id: warehouseId,
+        reference_type: 'Goods Receipt',
+        reference_id: goodsReceiptId,
+        reference_line_id: griResult.insertId,
+        movement_type: 'PURCHASE_RECEIPT',
+        direction: 'IN',
+        requested_uom_code: item.requested_uom_code,
+        base_uom_code: item.base_uom_code,
+        conversion_factor: item.conversion_factor,
+        requested_quantity: requestedQty,
+        base_quantity: baseQty,
+        unit_cost: baseUnitCost,
+        total_cost: baseQty * baseUnitCost,
+        lot_number: item.lot_number,
+        expiry_date: item.expiry_date,
+        serial_numbers_json: item.serial_numbers_json,
+        scope,
       });
 
       touchedProductIds.add(productId);
@@ -958,6 +1204,8 @@ export const createGoodsReceipt = async (req, res) => {
 
     await connection.commit();
 
+    const goodsReceiptScope = buildGoodsReceiptScope(scope);
+
     const [receiptRows] = await connection.query(
       `
       SELECT
@@ -974,9 +1222,9 @@ export const createGoodsReceipt = async (req, res) => {
       INNER JOIN purchase_orders po ON gr.purchase_order_id = po.id
       INNER JOIN suppliers s ON po.supplier_id = s.id
       INNER JOIN warehouses w ON gr.warehouse_id = w.id
-      WHERE gr.id = ? ${buildGoodsReceiptScope(scope).sql}
+      WHERE gr.id = ? ${goodsReceiptScope.sql}
       `,
-      [goodsReceiptId, ...buildGoodsReceiptScope(scope).values]
+      [goodsReceiptId, ...goodsReceiptScope.values]
     );
 
     const [receiptItemRows] = await connection.query(
@@ -1023,14 +1271,20 @@ export const postGoodsReceipt = async (req, res) => {
       return res.status(400).json({ message: 'Invalid goods receipt id' });
     }
 
+    const goodsReceiptScope = buildGoodsReceiptScope(scope);
+
     const [headerRows] = await connection.query(
       `
-      SELECT *
-      FROM goods_receipts
-      WHERE id = ? ${buildPurchaseOrderScope(scope).sql}
+      SELECT
+        gr.*,
+        po.po_number
+      FROM goods_receipts gr
+      INNER JOIN purchase_orders po ON gr.purchase_order_id = po.id
+      INNER JOIN warehouses w ON gr.warehouse_id = w.id
+      WHERE gr.id = ? ${goodsReceiptScope.sql}
       FOR UPDATE
       `,
-      [goodsReceiptId]
+      [goodsReceiptId, ...goodsReceiptScope.values]
     );
 
     if (headerRows.length === 0) {
@@ -1047,9 +1301,17 @@ export const postGoodsReceipt = async (req, res) => {
 
     const [itemRows] = await connection.query(
       `
-      SELECT *
-      FROM goods_receipt_items
-      WHERE goods_receipt_id = ?
+      SELECT
+        gri.*,
+        p.name AS product_name,
+        p.sku,
+        p.inventory_tracking_type,
+        p.is_lot_tracked,
+        p.is_serial_tracked,
+        p.is_expiry_tracked
+      FROM goods_receipt_items gri
+      INNER JOIN products p ON p.id = gri.product_id
+      WHERE gri.goods_receipt_id = ?
       FOR UPDATE
       `,
       [goodsReceiptId]
@@ -1104,13 +1366,12 @@ export const postGoodsReceipt = async (req, res) => {
         [Number(item.received_quantity), poItem.id]
       );
 
-      const stockState = await syncInventoryValuation(
+      const stockState = await applyGoodsReceiptInventoryImpact({
         connection,
-        Number(item.product_id),
-        Number(header.warehouse_id),
-        Number(item.received_quantity),
-        Number(item.unit_cost)
-      );
+        receipt: header,
+        line: item,
+        userId: req.user?.id || null,
+      });
 
       await connection.query(
         `
@@ -1138,26 +1399,12 @@ export const postGoodsReceipt = async (req, res) => {
           Number(item.received_quantity),
           stockState.previousQty,
           stockState.newQty,
-          `${header.gr_number} from PO ${header.purchase_order_id}`,
+          `${header.gr_number} from PO ${header.po_number}`,
           scope.company_id,
           scope.branch_id,
           scope.business_unit_id,
         ]
       );
-
-      await insertInventoryLedgerEntry({
-        connection,
-        receiptDate: header.receipt_date,
-        goodsReceiptId,
-        goodsReceiptItemId: Number(item.id),
-        productId: Number(item.product_id),
-        warehouseId: Number(header.warehouse_id),
-        quantity: Number(item.received_quantity),
-        unitCost: Number(item.unit_cost),
-        stockState,
-        remarks: `${header.gr_number} posted`,
-        userId: req.user?.id || null,
-      });
 
       touchedProductIds.add(Number(item.product_id));
     }
@@ -1228,9 +1475,9 @@ export const postGoodsReceipt = async (req, res) => {
       INNER JOIN purchase_orders po ON gr.purchase_order_id = po.id
       INNER JOIN suppliers s ON po.supplier_id = s.id
       INNER JOIN warehouses w ON gr.warehouse_id = w.id
-      WHERE gr.id = ? ${buildGoodsReceiptScope(scope, 'gr').sql}
+      WHERE gr.id = ? ${goodsReceiptScope.sql}
       `,
-      [goodsReceiptId, ...buildGoodsReceiptScope(scope, 'gr').values]
+      [goodsReceiptId, ...goodsReceiptScope.values]
     );
 
     const [receiptItemRows] = await connection.query(

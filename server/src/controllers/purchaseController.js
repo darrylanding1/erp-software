@@ -1,13 +1,17 @@
 import db from '../config/db.js';
 import { createAuditLog, getRequestIp } from '../utils/auditTrail.js';
 import {
-  createJournalEntry,
+  createJournalEntry as createGLJournalEntry,
   getAccountsByCodes,
   getJournalEntriesByReferenceTypes,
 } from '../utils/journalPosting.js';
-import { increaseWarehouseStock } from '../utils/inventoryStock.js';
 import { ensurePostingDateIsOpen } from '../utils/postingLock.js';
 import { buildScopeWhereClause, requireDataScope } from '../middleware/dataScopeMiddleware.js';
+import {
+  normalizePurchaseLine,
+  normalizeReceiptLine,
+  resolveProductFromVendorSku,
+} from '../utils/itemMasterResolvers.js';
 
 const getStockStatus = (quantity) => {
   const qty = Number(quantity) || 0;
@@ -40,6 +44,41 @@ const syncProductTotalFromWarehouses = async (connection, productId) => {
   );
 };
 
+
+const getDefaultAccountOrThrow = async (connection, purpose, scope) => {
+  const [rows] = await connection.query(
+    `
+    SELECT id, account_code, account_name
+    FROM chart_of_accounts
+    WHERE purpose = ?
+      AND (company_id = ? OR company_id IS NULL)
+      AND (branch_id = ? OR branch_id IS NULL)
+      AND (business_unit_id = ? OR business_unit_id IS NULL)
+      AND is_active = 1
+    ORDER BY
+      business_unit_id IS NULL,
+      branch_id IS NULL,
+      company_id IS NULL
+    LIMIT 1
+    `,
+    [
+      purpose,
+      scope.company_id || null,
+      scope.branch_id || null,
+      scope.business_unit_id || null,
+    ]
+  );
+
+  if (!rows.length) {
+    const error = new Error(`Missing default account setup for purpose: ${purpose}`);
+    error.statusCode = 400;
+    throw error;
+  }
+
+  return rows[0];
+};
+
+
 const getPurchaseOrderWithItems = async (connection, purchaseOrderId) => {
   const [poRows] = await connection.query(
     `
@@ -63,7 +102,14 @@ const getPurchaseOrderWithItems = async (connection, purchaseOrderId) => {
     SELECT
       poi.*,
       p.name AS product_name,
-      p.sku
+      p.sku,
+      p.uom,
+      p.alternate_uoms_json,
+      p.vendor_item_mappings_json,
+      p.inventory_tracking_type,
+      p.is_lot_tracked,
+      p.is_serial_tracked,
+      p.is_expiry_tracked
     FROM purchase_order_items poi
     INNER JOIN products p ON poi.product_id = p.id
     WHERE poi.purchase_order_id = ?
@@ -175,9 +221,11 @@ const assertWarehouseScopeAccess = async (connection, warehouseId, scope) => {
 
 export const getPurchaseJournalEntries = async (req, res) => {
   try {
-    const { company_id, branch_id, business_unit_id } = requireDataScope(req);
+    const scope = requireDataScope(req);
+    const { company_id, branch_id, business_unit_id } = scope;
 
     const entries = await getJournalEntriesByReferenceTypes(db, [
+      'Goods Receipt',
       'AP Invoice',
       'AP Payment',
     ]);
@@ -228,15 +276,48 @@ export const getPurchaseMeta = async (req, res) => {
       supplierScope.values
     );
 
-    const [products] = await db.query(
+    const [productRows] = await db.query(
       `
-      SELECT p.id, p.name, p.sku, p.base_price, p.market_price, p.quantity, p.status
+      SELECT 
+        p.id, 
+        p.name, 
+        p.sku,
+        p.uom,
+        p.alternate_uoms_json,
+        p.base_price, 
+        p.market_price, 
+        p.standard_cost,
+        p.quantity, 
+        p.status,
+        p.vendor_item_mappings_json,
+        p.inventory_tracking_type,
+        p.is_lot_tracked,
+        p.is_serial_tracked,
+        p.is_expiry_tracked
       FROM products p
       WHERE 1 = 1 ${productScope.sql}
       ORDER BY p.name ASC
       `,
       productScope.values
     );
+
+    const products = productRows.map((row) => ({
+      ...row,
+      alternate_uoms: (() => {
+        try {
+          return JSON.parse(row.alternate_uoms_json || '[]');
+        } catch {
+          return [];
+        }
+      })(),
+      vendor_item_mappings: (() => {
+        try {
+          return JSON.parse(row.vendor_item_mappings_json || '[]');
+        } catch {
+          return [];
+        }
+      })(),
+    }));
 
     const [warehouses] = await db.query(
       `
@@ -251,7 +332,9 @@ export const getPurchaseMeta = async (req, res) => {
     res.json({ suppliers, products, warehouses });
   } catch (error) {
     console.error('Get purchase meta error:', error);
-    res.status(error.statusCode || 500).json({ message: error.message || 'Failed to fetch purchase metadata' });
+    res.status(error.statusCode || 500).json({
+      message: error.message || 'Failed to fetch purchase metadata',
+    });
   }
 };
 
@@ -355,18 +438,100 @@ export const createPurchaseOrder = async (req, res) => {
       return res.status(400).json({ message: 'Invalid purchase order data' });
     }
 
-    const cleanedItems = items
-      .map((item) => ({
-        product_id: Number(item.product_id),
-        quantity: Number(item.quantity),
-        unit_cost: Number(item.unit_cost),
-      }))
-      .filter(
-        (item) =>
-          item.product_id > 0 &&
-          item.quantity > 0 &&
-          item.unit_cost >= 0
-      );
+    await ensurePostingDateIsOpen(connection, order_date, req);
+
+    const productScope = buildScopeWhereClause(
+      { company_id, branch_id, business_unit_id },
+      {
+        company: 'p.company_id',
+        branch: 'p.branch_id',
+        businessUnit: 'p.business_unit_id',
+      }
+    );
+
+    const requestedProductIds = [
+      ...new Set(
+        items
+          .map((item) => Number(item.product_id))
+          .filter((id) => Number.isFinite(id) && id > 0)
+      ),
+    ];
+
+    const loadAllProductsForVendorResolution = requestedProductIds.length !== items.length;
+
+    const productQuery = loadAllProductsForVendorResolution
+      ? `
+        SELECT
+          p.id,
+          p.name,
+          p.sku,
+          p.uom,
+          p.base_price,
+          p.standard_cost,
+          p.alternate_uoms_json,
+          p.vendor_item_mappings_json,
+          p.inventory_tracking_type,
+          p.is_lot_tracked,
+          p.is_serial_tracked,
+          p.is_expiry_tracked
+        FROM products p
+        WHERE 1 = 1 ${productScope.sql}
+      `
+      : `
+        SELECT
+          p.id,
+          p.name,
+          p.sku,
+          p.uom,
+          p.base_price,
+          p.standard_cost,
+          p.alternate_uoms_json,
+          p.vendor_item_mappings_json,
+          p.inventory_tracking_type,
+          p.is_lot_tracked,
+          p.is_serial_tracked,
+          p.is_expiry_tracked
+        FROM products p
+        WHERE p.id IN (?) ${productScope.sql}
+      `;
+
+    const productParams = loadAllProductsForVendorResolution
+      ? [...productScope.values]
+      : [requestedProductIds, ...productScope.values];
+
+    const [productRows] = await connection.query(productQuery, productParams);
+
+    const productMap = new Map(productRows.map((row) => [Number(row.id), row]));
+
+    const cleanedItems = items.map((item) => {
+      let product = null;
+
+      if (Number(item.product_id) > 0) {
+        product = productMap.get(Number(item.product_id)) || null;
+      } else if (item.vendor_sku) {
+        const resolved = resolveProductFromVendorSku({
+          products: productRows,
+          supplierId: Number(supplier_id),
+          vendorSku: item.vendor_sku,
+        });
+
+        product = resolved?.product || null;
+      }
+
+      if (!product) {
+        throw new Error(
+          item.vendor_sku
+            ? `No in-scope product matches vendor SKU ${item.vendor_sku}`
+            : `Product ${item.product_id} is invalid or outside scope`
+        );
+      }
+
+      return normalizePurchaseLine({
+        item,
+        product,
+        supplierId: Number(supplier_id),
+      });
+    });
 
     if (cleanedItems.length === 0) {
       await connection.rollback();
@@ -374,7 +539,7 @@ export const createPurchaseOrder = async (req, res) => {
     }
 
     const totalAmount = cleanedItems.reduce(
-      (sum, item) => sum + item.quantity * item.unit_cost,
+      (sum, item) => sum + Number(item.line_total || 0),
       0
     );
 
@@ -409,15 +574,42 @@ export const createPurchaseOrder = async (req, res) => {
     );
 
     for (const item of cleanedItems) {
-      const lineTotal = item.quantity * item.unit_cost;
-
       await connection.query(
         `
         INSERT INTO purchase_order_items
-        (purchase_order_id, product_id, quantity, received_quantity, unit_cost, line_total)
-        VALUES (?, ?, ?, 0, ?, ?)
+        (
+          purchase_order_id,
+          product_id,
+          vendor_sku,
+          requested_uom_code,
+          base_uom_code,
+          conversion_factor,
+          requested_quantity,
+          base_quantity,
+          quantity,
+          received_quantity,
+          requested_unit_cost,
+          base_unit_cost,
+          unit_cost,
+          line_total
+        )
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 0, ?, ?, ?, ?)
         `,
-        [poResult.insertId, item.product_id, item.quantity, item.unit_cost, lineTotal]
+        [
+          poResult.insertId,
+          item.product_id,
+          item.vendor_sku || null,
+          item.requested_uom_code || null,
+          item.base_uom_code || null,
+          Number(item.conversion_factor || 1),
+          Number(item.requested_quantity || 0),
+          Number(item.base_quantity || item.quantity || 0),
+          Number(item.base_quantity || item.quantity || 0),
+          Number(item.requested_unit_cost || item.unit_cost || 0),
+          Number(item.base_unit_cost || item.unit_cost || 0),
+          Number(item.base_unit_cost || item.unit_cost || 0),
+          Number(item.line_total || 0),
+        ]
       );
     }
 
@@ -457,7 +649,7 @@ export const createPurchaseOrder = async (req, res) => {
   } catch (error) {
     await connection.rollback();
     console.error('Create purchase order error:', error);
-    res.status(500).json({ message: 'Failed to create purchase order' });
+    res.status(500).json({ message: error.message || 'Failed to create purchase order' });
   } finally {
     connection.release();
   }
@@ -469,7 +661,8 @@ export const receivePurchaseOrder = async (req, res) => {
   try {
     await connection.beginTransaction();
 
-    const { company_id, branch_id, business_unit_id } = requireDataScope(req);
+    const scope = requireDataScope(req);
+    const { company_id, branch_id, business_unit_id } = scope;
     const { id } = req.params;
     const { warehouse_id, receipt_date, remarks, items } = req.body;
 
@@ -508,17 +701,24 @@ export const receivePurchaseOrder = async (req, res) => {
       return res.status(400).json({ message: 'Cancelled PO cannot be received' });
     }
 
-    await assertWarehouseScopeAccess(connection, warehouseId, requireDataScope(req));
+    await assertWarehouseScopeAccess(connection, warehouseId, scope);
 
     const poItemMap = new Map();
     for (const item of purchaseOrder.items) {
-      poItemMap.set(item.id, item);
+      poItemMap.set(Number(item.id), item);
     }
 
     const receiptItems = items
       .map((item) => ({
         purchase_order_item_id: Number(item.purchase_order_item_id),
         received_quantity: Number(item.received_quantity),
+        vendor_sku: item.vendor_sku || null,
+        uom_code: item.uom_code || null,
+        lot_number: item.lot_number || null,
+        expiry_date: item.expiry_date || null,
+        serial_numbers_json: Array.isArray(item.serial_numbers_json)
+          ? item.serial_numbers_json
+          : [],
       }))
       .filter((item) => item.purchase_order_item_id > 0 && item.received_quantity > 0);
 
@@ -527,24 +727,80 @@ export const receivePurchaseOrder = async (req, res) => {
       return res.status(400).json({ message: 'Enter at least one received quantity' });
     }
 
+    const normalizedReceiptItems = [];
+
     for (const item of receiptItems) {
-      const poItem = poItemMap.get(item.purchase_order_item_id);
+      const poItem = poItemMap.get(Number(item.purchase_order_item_id));
 
       if (!poItem) {
-        await connection.rollback();
-        return res.status(400).json({ message: 'One or more PO items are invalid' });
+        throw new Error(`PO item not found: ${item.purchase_order_item_id}`);
       }
 
-      const remainingQty =
-        Number(poItem.quantity) - Number(poItem.received_quantity || 0);
+      const normalized = normalizeReceiptLine({
+        item: {
+          ...item,
+          quantity: item.received_quantity,
+          unit_cost: poItem.requested_unit_cost || poItem.unit_cost,
+          vendor_sku: item.vendor_sku || poItem.vendor_sku || null,
+          uom_code: item.uom_code || poItem.requested_uom_code || poItem.uom_code || poItem.uom,
+        },
+        product: poItem,
+        supplierId: Number(purchaseOrder.supplier_id),
+      });
 
-      if (item.received_quantity > remainingQty) {
+      normalizedReceiptItems.push({
+        ...normalized,
+        purchase_order_item_id: Number(poItem.id),
+        product_id: Number(normalized.product_id || poItem.product_id),
+        lot_number: item.lot_number || null,
+        expiry_date: item.expiry_date || null,
+        serial_numbers_json: item.serial_numbers_json || [],
+      });
+    }
+
+    for (const item of normalizedReceiptItems) {
+      const poItem = poItemMap.get(item.purchase_order_item_id);
+      const remainingQty =
+        Number(poItem.quantity || 0) - Number(poItem.received_quantity || 0);
+      const baseReceivedQuantity = Number(item.base_quantity || 0);
+      const requestedReceivedQuantity = Number(item.requested_quantity || 0);
+
+      if (baseReceivedQuantity > remainingQty) {
         await connection.rollback();
         return res.status(400).json({
           message: `Received quantity exceeds remaining quantity for ${poItem.product_name}`,
         });
       }
+
+      if (
+        (poItem.is_lot_tracked || poItem.inventory_tracking_type === 'LOT') &&
+        !item.lot_number
+      ) {
+        await connection.rollback();
+        return res.status(400).json({
+          message: `${poItem.product_name} requires lot_number`,
+        });
+      }
+
+      if (poItem.is_expiry_tracked && !item.expiry_date) {
+        await connection.rollback();
+        return res.status(400).json({
+          message: `${poItem.product_name} requires expiry_date`,
+        });
+      }
+
+      if (
+        (poItem.is_serial_tracked || poItem.inventory_tracking_type === 'SERIAL') &&
+        item.serial_numbers_json.length !== requestedReceivedQuantity
+      ) {
+        await connection.rollback();
+        return res.status(400).json({
+          message: `${poItem.product_name} serial count must match received quantity`,
+        });
+      }
     }
+
+    await ensurePostingDateIsOpen(connection, receipt_date, req);
 
     const grNumber = `GR-${Date.now()}`;
 
@@ -557,35 +813,79 @@ export const receivePurchaseOrder = async (req, res) => {
       [grNumber, purchaseOrderId, warehouseId, receipt_date, remarks || null]
     );
 
+    const goodsReceiptId = grResult.insertId;
     const touchedProducts = new Set();
+    let totalInventoryAmount = 0;
 
-    for (const item of receiptItems) {
+    for (const item of normalizedReceiptItems) {
       const poItem = poItemMap.get(item.purchase_order_item_id);
-      const productId = Number(poItem.product_id);
-      const receivedQty = Number(item.received_quantity);
-      const unitCost = Number(poItem.unit_cost || 0);
-      const lineTotal = receivedQty * unitCost;
+      const productId = Number(item.product_id || poItem.product_id);
+      const requestedQuantity = Number(item.requested_quantity || 0);
+      const baseQuantity = Number(item.base_quantity || 0);
+      const requestedUnitCost = Number(
+        item.requested_unit_cost || poItem.requested_unit_cost || poItem.unit_cost || 0
+      );
+      const baseUnitCost = Number(
+        item.base_unit_cost || poItem.base_unit_cost || poItem.unit_cost || 0
+      );
+      const lineTotal = baseQuantity * baseUnitCost;
 
-      await connection.query(
+      const [[beforeStockRow]] = await connection.query(
         `
-        INSERT INTO goods_receipt_items
-        (
+        SELECT COALESCE(quantity, 0) AS quantity
+        FROM inventory_stocks
+        WHERE product_id = ?
+          AND warehouse_id = ?
+          AND company_id = ?
+          AND branch_id = ?
+          AND business_unit_id = ?
+        LIMIT 1
+        `,
+        [productId, warehouseId, company_id, branch_id, business_unit_id]
+      );
+
+      const previousQuantity = Number(beforeStockRow?.quantity || 0);
+
+      const [result] = await connection.query(
+        `
+        INSERT INTO goods_receipt_items (
           goods_receipt_id,
           purchase_order_item_id,
           product_id,
+          vendor_sku,
+          requested_uom_code,
+          base_uom_code,
+          conversion_factor,
+          requested_received_quantity,
+          base_received_quantity,
           received_quantity,
+          requested_unit_cost,
+          base_unit_cost,
           unit_cost,
-          line_total
-        )
-        VALUES (?, ?, ?, ?, ?, ?)
+          line_total,
+          lot_number,
+          expiry_date,
+          serial_numbers_json
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         `,
         [
-          grResult.insertId,
-          poItem.id,
+          goodsReceiptId,
+          item.purchase_order_item_id,
           productId,
-          receivedQty,
-          unitCost,
+          item.vendor_sku || null,
+          item.requested_uom_code || null,
+          item.base_uom_code || null,
+          Number(item.conversion_factor || 1),
+          requestedQuantity,
+          baseQuantity,
+          baseQuantity,
+          requestedUnitCost,
+          baseUnitCost,
+          baseUnitCost,
           lineTotal,
+          item.lot_number,
+          item.expiry_date,
+          JSON.stringify(item.serial_numbers_json || []),
         ]
       );
 
@@ -595,15 +895,42 @@ export const receivePurchaseOrder = async (req, res) => {
         SET received_quantity = received_quantity + ?
         WHERE id = ?
         `,
-        [receivedQty, poItem.id]
+        [baseQuantity, poItem.id]
       );
 
-      const stockChange = await increaseWarehouseStock(connection, {
-        productId,
-        warehouseId,
-        quantity: receivedQty,
-        unitCost,
-      });
+      await connection.query(
+        `
+        INSERT INTO inventory_stocks (
+          product_id,
+          warehouse_id,
+          quantity,
+          total_value,
+          company_id,
+          branch_id,
+          business_unit_id
+        )
+        VALUES (?, ?, ?, ?, ?, ?, ?)
+        ON DUPLICATE KEY UPDATE
+          quantity = quantity + VALUES(quantity),
+          total_value = total_value + VALUES(total_value)
+        `,
+        [
+          productId,
+          warehouseId,
+          baseQuantity,
+          baseQuantity * baseUnitCost,
+          company_id,
+          branch_id,
+          business_unit_id,
+        ]
+      );
+
+      const inventoryAmount =
+        Number(item.base_quantity || 0) * Number(item.base_unit_cost || 0);
+
+      totalInventoryAmount += inventoryAmount;
+
+      const newQuantity = previousQuantity + baseQuantity;
 
       await connection.query(
         `
@@ -624,15 +951,50 @@ export const receivePurchaseOrder = async (req, res) => {
         [
           productId,
           warehouseId,
-          grResult.insertId,
-          receivedQty,
-          stockChange.previousQuantity,
-          stockChange.newQuantity,
+          goodsReceiptId,
+          baseQuantity,
+          previousQuantity,
+          newQuantity,
           `${grNumber} received from ${purchaseOrder.po_number}`,
         ]
       );
 
       touchedProducts.add(productId);
+    }
+
+    if (totalInventoryAmount > 0) {
+      const inventoryAccount = await getDefaultAccountOrThrow(connection, 'inventory', scope);
+      const grniAccount = await getDefaultAccountOrThrow(
+        connection,
+        'goods_received_not_invoiced',
+        scope
+      );
+
+      await createGLJournalEntry(connection, {
+        entryDate: receipt_date,
+        referenceType: 'Goods Receipt',
+        referenceId: goodsReceiptId,
+        memo: `Goods receipt posting for ${grNumber}`,
+        scope,
+        lines: [
+          {
+            account_id: inventoryAccount.id,
+            account_code: inventoryAccount.account_code,
+            account_name: inventoryAccount.account_name,
+            description: `Increase inventory for ${grNumber}`,
+            debit: totalInventoryAmount,
+            credit: 0,
+          },
+          {
+            account_id: grniAccount.id,
+            account_code: grniAccount.account_code,
+            account_name: grniAccount.account_name,
+            description: `Accrue received goods for ${grNumber}`,
+            debit: 0,
+            credit: totalInventoryAmount,
+          },
+        ],
+      });
     }
 
     for (const productId of touchedProducts) {
@@ -673,44 +1035,22 @@ export const receivePurchaseOrder = async (req, res) => {
 
     await connection.commit();
 
-    const goodsReceiptId = grResult.insertId;
-
-    try {
-      await createAuditLog({
-        userId: req.user?.id || null,
-        action: 'UPDATE',
-        moduleName: 'Goods Receipts',
-        recordId: goodsReceiptId,
-        description: `Received purchase order ${purchaseOrder.po_number} into warehouse ${warehouseId}`,
-        newValues: {
-          goods_receipt_id: goodsReceiptId,
-          purchase_order_id: purchaseOrder.id,
-          po_number: purchaseOrder.po_number,
-          warehouse_id: warehouseId,
-          receipt_date,
-          company_id,
-          branch_id,
-          business_unit_id,
-          received_items: receiptItems,
-        },
-        ipAddress: getRequestIp(req),
-      });
-    } catch (auditError) {
-      console.error('Goods receipt audit log error:', auditError);
-    }
-
-    const updatedPo = await getPurchaseOrderWithItems(connection, purchaseOrderId);
-
     res.status(201).json({
       message: 'Goods receipt saved successfully',
-      goods_receipt_id: goodsReceiptId,
-      goods_receipt_number: grNumber,
-      purchase_order: updatedPo,
+      id: goodsReceiptId,
+      gr_number: grNumber,
+      purchase_order_id: purchaseOrderId,
+      warehouse_id: warehouseId,
+      receipt_date,
+      remarks: remarks || null,
+      status: 'Posted',
     });
   } catch (error) {
     await connection.rollback();
     console.error('Receive purchase order error:', error);
-    res.status(500).json({ message: error.message || 'Failed to save goods receipt' });
+    res.status(error.statusCode || 500).json({
+      message: error.message || 'Failed to receive purchase order',
+    });
   } finally {
     connection.release();
   }
@@ -958,7 +1298,8 @@ export const createApInvoice = async (req, res) => {
   try {
     await connection.beginTransaction();
 
-    const { company_id, branch_id, business_unit_id } = requireDataScope(req);
+    const scope = requireDataScope(req);
+    const { company_id, branch_id, business_unit_id } = scope;
     const {
       purchase_order_id,
       supplier_invoice_number,
@@ -1043,6 +1384,8 @@ export const createApInvoice = async (req, res) => {
       }
     }
 
+    await ensurePostingDateIsOpen(connection, invoice_date, req);
+
     const totalAmount = cleanedItems.reduce((sum, item) => {
       const poItem = poItemMap.get(item.purchase_order_item_id);
       return sum + item.billed_quantity * Number(poItem.unit_cost || 0);
@@ -1116,36 +1459,37 @@ export const createApInvoice = async (req, res) => {
       );
     }
 
-    const accounts = await getAccountsByCodes(connection, ['1200', '2000']);
+    const grniAccount = await getDefaultAccountOrThrow(
+      connection,
+      'goods_received_not_invoiced',
+      scope
+    );
+    const apAccount = await getDefaultAccountOrThrow(
+      connection,
+      'accounts_payable',
+      scope
+    );
 
-    if (!accounts['1200'] || !accounts['2000']) {
-      throw new Error(
-        'Required accounts not found. Please create Inventory Asset (1200) and Accounts Payable (2000).'
-      );
-    }
-
-    await createJournalEntry(connection, {
-      entry_date: invoice_date,
-      reference_type: 'AP Invoice',
-      reference_id: invoiceResult.insertId,
+    await createGLJournalEntry(connection, {
+      entryDate: invoice_date,
+      referenceType: 'AP Invoice',
+      referenceId: invoiceResult.insertId,
       memo: `AP invoice ${invoiceNumber} for PO ${purchaseOrder.po_number}`,
-      company_id,
-      branch_id,
-      business_unit_id,
+      scope,
       lines: [
         {
-          account_id: accounts['1200'].id,
-          account_code: accounts['1200'].account_code,
-          account_name: accounts['1200'].account_name,
-          description: `Inventory from PO ${purchaseOrder.po_number}`,
+          account_id: grniAccount.id,
+          account_code: grniAccount.account_code,
+          account_name: grniAccount.account_name,
+          description: `Reverse GRNI for PO ${purchaseOrder.po_number}`,
           debit: totalAmount,
           credit: 0,
         },
         {
-          account_id: accounts['2000'].id,
-          account_code: accounts['2000'].account_code,
-          account_name: accounts['2000'].account_name,
-          description: `Payable to supplier for ${invoiceNumber}`,
+          account_id: apAccount.id,
+          account_code: apAccount.account_code,
+          account_name: apAccount.account_name,
+          description: `Recognize AP for ${invoiceNumber}`,
           debit: 0,
           credit: totalAmount,
         },
@@ -1504,14 +1848,12 @@ export const createApPayment = async (req, res) => {
       );
     }
 
-    await createJournalEntry(connection, {
-      entry_date: payment_date,
-      reference_type: 'AP Payment',
-      reference_id: paymentResult.insertId,
+    await createGLJournalEntry(connection, {
+      entryDate: payment_date,
+      referenceType: 'AP Payment',
+      referenceId: paymentResult.insertId,
       memo: `AP payment ${paymentNumber} for invoice ${invoiceRow.invoice_number}`,
-      company_id,
-      branch_id,
-      business_unit_id,
+      scope: { company_id, branch_id, business_unit_id },
       lines: [
         {
           account_id: accounts['2000'].id,

@@ -21,7 +21,10 @@ export const getGoodsReceiptById = async (id) => {
 };
 
 export const createGoodsReceiptFromPurchaseOrder = async (purchaseOrderId, payload) => {
-  const response = await api.post(`/api/goods-receipts/from-po/${purchaseOrderId}`, payload);
+  const response = await api.post('/api/goods-receipts', {
+    ...payload,
+    purchase_order_id: Number(purchaseOrderId),
+  });
   return response.data;
 };
 

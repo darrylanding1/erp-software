@@ -16,6 +16,11 @@ import {
 const inputClassName =
   'w-full rounded-2xl border border-[#ebe4f7] bg-white px-4 py-3 outline-none transition focus:border-[#9b6bff]';
 
+const compactInputClassName =
+  'w-full rounded-xl border border-[#ebe4f7] bg-white px-3 py-2 text-sm outline-none transition focus:border-[#9b6bff]';
+
+const today = new Date().toISOString().split('T')[0];
+
 const formatNumber = (value) =>
   new Intl.NumberFormat('en-PH', {
     minimumFractionDigits: 0,
@@ -28,7 +33,50 @@ const formatCurrency = (value) =>
     currency: 'PHP',
   }).format(Number(value || 0));
 
-const today = new Date().toISOString().split('T')[0];
+const parseNumeric = (value) => {
+  const parsed = Number(value);
+  return Number.isFinite(parsed) ? parsed : 0;
+};
+
+const normalizeSerialNumbers = (value) => {
+  if (!value) return [];
+
+  return [...new Set(
+    String(value)
+      .split(/\r?\n|,|;/)
+      .map((item) => item.trim())
+      .filter(Boolean)
+  )];
+};
+
+const isLotTracked = (line) =>
+  Boolean(line?.is_lot_tracked) || String(line?.inventory_tracking_type || '').toUpperCase() === 'LOT';
+
+const isSerialTracked = (line) =>
+  Boolean(line?.is_serial_tracked) || String(line?.inventory_tracking_type || '').toUpperCase() === 'SERIAL';
+
+const isExpiryTracked = (line) => Boolean(line?.is_expiry_tracked);
+
+const createLineInput = (line, existing = {}) => ({
+  purchase_order_item_id: Number(line.id),
+  received_quantity:
+    existing.received_quantity !== undefined && existing.received_quantity !== null
+      ? String(existing.received_quantity)
+      : String(line.suggested_quantity ?? line.remaining_quantity ?? 0),
+  lot_number: existing.lot_number ?? '',
+  expiry_date: existing.expiry_date ?? '',
+  serial_numbers_text: existing.serial_numbers_text ?? '',
+});
+
+const getTrackingLabel = (line) => {
+  const labels = [];
+
+  if (isLotTracked(line)) labels.push('Lot');
+  if (isSerialTracked(line)) labels.push('Serial');
+  if (isExpiryTracked(line)) labels.push('Expiry');
+
+  return labels.length ? labels.join(' • ') : 'Standard';
+};
 
 export default function GoodsReceiptsPage() {
   const [meta, setMeta] = useState({
@@ -46,8 +94,10 @@ export default function GoodsReceiptsPage() {
   const [suggestions, setSuggestions] = useState({
     purchase_order: null,
     suggested_warehouse_id: null,
-    suggested_lines: [],
+    items: [],
   });
+
+  const [lineInputs, setLineInputs] = useState({});
 
   const [filters, setFilters] = useState({
     purchase_order_id: '',
@@ -84,7 +134,10 @@ export default function GoodsReceiptsPage() {
     try {
       setLoadingMeta(true);
       const data = await getGoodsReceiptMeta();
-      setMeta(data);
+      setMeta({
+        purchaseOrders: Array.isArray(data?.purchaseOrders) ? data.purchaseOrders : [],
+        warehouses: Array.isArray(data?.warehouses) ? data.warehouses : [],
+      });
     } catch (error) {
       console.error('Load goods receipt meta error:', error);
     } finally {
@@ -97,19 +150,47 @@ export default function GoodsReceiptsPage() {
       setSuggestions({
         purchase_order: null,
         suggested_warehouse_id: null,
-        suggested_lines: [],
+        items: [],
       });
+      setLineInputs({});
       return;
     }
 
     try {
       setLoadingSuggestions(true);
+
       const data = await getGoodsReceiptSuggestions({
         purchase_order_id: form.purchase_order_id,
         warehouse_id: form.warehouse_id || undefined,
       });
 
-      setSuggestions(data);
+      const normalizedItems = Array.isArray(data?.items)
+        ? data.items.map((item) => ({
+            ...item,
+            remaining_quantity:
+              item.remaining_quantity ??
+              Math.max(0, Number(item.quantity || 0) - Number(item.received_quantity || 0)),
+            suggested_quantity:
+              item.suggested_quantity ??
+              Math.max(0, Number(item.quantity || 0) - Number(item.received_quantity || 0)),
+          }))
+        : [];
+
+      setSuggestions({
+        purchase_order: data?.purchase_order || null,
+        suggested_warehouse_id: data?.suggested_warehouse_id || null,
+        items: normalizedItems,
+      });
+
+      setLineInputs((prev) => {
+        const next = {};
+
+        normalizedItems.forEach((line) => {
+          next[line.id] = createLineInput(line, prev[line.id]);
+        });
+
+        return next;
+      });
 
       if (!form.warehouse_id && data?.suggested_warehouse_id) {
         setForm((prev) => ({
@@ -123,8 +204,9 @@ export default function GoodsReceiptsPage() {
       setSuggestions({
         purchase_order: null,
         suggested_warehouse_id: null,
-        suggested_lines: [],
+        items: [],
       });
+      setLineInputs({});
     } finally {
       setLoadingSuggestions(false);
     }
@@ -164,8 +246,80 @@ export default function GoodsReceiptsPage() {
   useEffect(() => {
     if (form.purchase_order_id) {
       loadSuggestions();
+    } else {
+      setSuggestions({
+        purchase_order: null,
+        suggested_warehouse_id: null,
+        items: [],
+      });
+      setLineInputs({});
     }
   }, [form.purchase_order_id, form.warehouse_id]);
+
+  const handleLineInputChange = (lineId, field, value) => {
+    setLineInputs((prev) => ({
+      ...prev,
+      [lineId]: {
+        ...prev[lineId],
+        [field]: value,
+      },
+    }));
+  };
+
+  const buildReceiptItemsPayload = () => {
+    const payload = [];
+
+    for (const line of suggestions.items) {
+      const state = lineInputs[line.id] || createLineInput(line);
+      const receivedQty = parseNumeric(state.received_quantity);
+      const remainingQty = parseNumeric(line.remaining_quantity);
+      const serialNumbers = normalizeSerialNumbers(state.serial_numbers_text);
+
+      if (receivedQty <= 0) {
+        continue;
+      }
+
+      if (receivedQty > remainingQty) {
+        throw new Error(`${line.product_name} receipt quantity cannot exceed open quantity.`);
+      }
+
+      if (isLotTracked(line) && !String(state.lot_number || '').trim()) {
+        throw new Error(`${line.product_name} requires a lot number.`);
+      }
+
+      if (isExpiryTracked(line) && !state.expiry_date) {
+        throw new Error(`${line.product_name} requires an expiry date.`);
+      }
+
+      if (isSerialTracked(line)) {
+        if (!serialNumbers.length) {
+          throw new Error(`${line.product_name} requires serial numbers.`);
+        }
+
+        if (serialNumbers.length !== receivedQty) {
+          throw new Error(
+            `${line.product_name} serial count must match the receipt quantity exactly.`
+          );
+        }
+      } else if (serialNumbers.length) {
+        throw new Error(`${line.product_name} is not serial-tracked, so remove the serial numbers.`);
+      }
+
+      payload.push({
+        purchase_order_item_id: Number(line.id),
+        received_quantity: receivedQty,
+        lot_number: String(state.lot_number || '').trim() || null,
+        expiry_date: state.expiry_date || null,
+        serial_numbers_json: serialNumbers,
+      });
+    }
+
+    if (!payload.length) {
+      throw new Error('Enter at least one receipt quantity greater than zero.');
+    }
+
+    return payload;
+  };
 
   const handleCreateDraft = async (e) => {
     e.preventDefault();
@@ -178,10 +332,15 @@ export default function GoodsReceiptsPage() {
     try {
       setSaving(true);
 
+      const items = buildReceiptItemsPayload();
+
       const result = await createGoodsReceiptFromPurchaseOrder(form.purchase_order_id, {
         warehouse_id: Number(form.warehouse_id),
         receipt_date: form.receipt_date,
         remarks: form.remarks,
+        items,
+        use_suggestions: false,
+        auto_post: false,
       });
 
       alert(result.message || 'Goods receipt draft created.');
@@ -196,8 +355,10 @@ export default function GoodsReceiptsPage() {
       setSuggestions({
         purchase_order: null,
         suggested_warehouse_id: null,
-        suggested_lines: [],
+        items: [],
       });
+
+      setLineInputs({});
 
       await loadGoodsReceipts();
 
@@ -206,7 +367,7 @@ export default function GoodsReceiptsPage() {
       }
     } catch (error) {
       console.error('Create goods receipt draft error:', error);
-      alert(error?.response?.data?.message || 'Failed to create goods receipt draft.');
+      alert(error?.response?.data?.message || error.message || 'Failed to create goods receipt draft.');
     } finally {
       setSaving(false);
     }
@@ -232,7 +393,7 @@ export default function GoodsReceiptsPage() {
     <div className="space-y-4 sm:space-y-5 lg:space-y-6">
       <PageHeader
         title="Goods Receipts"
-        subtitle="Receive PR-created purchase order lines into the correct warehouse with receiving suggestions."
+        subtitle="Receive purchase order lines into the correct warehouse, including lot, expiry, and serial details for tracked items."
         stats={[
           { label: 'Receipts', value: stats.total },
           { label: 'Draft', value: stats.draft },
@@ -255,7 +416,10 @@ export default function GoodsReceiptsPage() {
                   className={inputClassName}
                   value={form.purchase_order_id}
                   onChange={(e) =>
-                    setForm((prev) => ({ ...prev, purchase_order_id: e.target.value }))
+                    setForm((prev) => ({
+                      ...prev,
+                      purchase_order_id: e.target.value,
+                    }))
                   }
                   required
                 >
@@ -276,7 +440,10 @@ export default function GoodsReceiptsPage() {
                   className={inputClassName}
                   value={form.warehouse_id}
                   onChange={(e) =>
-                    setForm((prev) => ({ ...prev, warehouse_id: e.target.value }))
+                    setForm((prev) => ({
+                      ...prev,
+                      warehouse_id: e.target.value,
+                    }))
                   }
                   required
                 >
@@ -298,7 +465,10 @@ export default function GoodsReceiptsPage() {
                   className={inputClassName}
                   value={form.receipt_date}
                   onChange={(e) =>
-                    setForm((prev) => ({ ...prev, receipt_date: e.target.value }))
+                    setForm((prev) => ({
+                      ...prev,
+                      receipt_date: e.target.value,
+                    }))
                   }
                   required
                 />
@@ -313,7 +483,10 @@ export default function GoodsReceiptsPage() {
                   className={inputClassName}
                   value={form.remarks}
                   onChange={(e) =>
-                    setForm((prev) => ({ ...prev, remarks: e.target.value }))
+                    setForm((prev) => ({
+                      ...prev,
+                      remarks: e.target.value,
+                    }))
                   }
                   placeholder="Optional remarks"
                 />
@@ -324,6 +497,7 @@ export default function GoodsReceiptsPage() {
               <AppButton type="button" variant="secondary" onClick={loadSuggestions}>
                 Refresh Suggestions
               </AppButton>
+
               <PermissionGate permission="goods_receipts.create">
                 <AppButton type="submit" variant="primary" disabled={saving}>
                   {saving ? 'Creating Draft...' : 'Create Goods Receipt Draft'}
@@ -338,45 +512,132 @@ export default function GoodsReceiptsPage() {
             <div className="text-sm text-[#7c7494]">Loading warehouse-aware suggestions...</div>
           ) : !suggestions.purchase_order ? (
             <EmptyState message="Select a purchase order to see receiving suggestions." />
-          ) : suggestions.suggested_lines.length === 0 ? (
+          ) : suggestions.items.length === 0 ? (
             <EmptyState message="No open PO lines found for the selected warehouse." />
           ) : (
-            <div className="overflow-x-auto rounded-3xl border border-[#ebe4f7] bg-white">
-              <table className="min-w-full">
-                <thead className="bg-[#f7f2ff] text-left text-[#4d3188]">
-                  <tr>
-                    <th className="px-4 py-3">Product</th>
-                    <th className="px-4 py-3">Requested Warehouse</th>
-                    <th className="px-4 py-3">PO Qty</th>
-                    <th className="px-4 py-3">Received</th>
-                    <th className="px-4 py-3">Open Qty</th>
-                    <th className="px-4 py-3">Suggested Receipt</th>
-                    <th className="px-4 py-3">Unit Cost</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {suggestions.suggested_lines.map((line) => (
-                    <tr key={line.id} className="border-t border-[#ebe4f7]">
-                      <td className="px-4 py-3">
-                        <div className="font-medium text-[#4d3188]">{line.product_name}</div>
-                        <div className="text-xs text-[#7c7494]">{line.sku}</div>
-                      </td>
-                      <td className="px-4 py-3">
-                        {line.requested_warehouse_name
-                          ? `${line.requested_warehouse_code} - ${line.requested_warehouse_name}`
-                          : 'No requested warehouse'}
-                      </td>
-                      <td className="px-4 py-3">{formatNumber(line.quantity)}</td>
-                      <td className="px-4 py-3">{formatNumber(line.received_quantity)}</td>
-                      <td className="px-4 py-3 font-semibold text-[#4d3188]">
-                        {formatNumber(line.remaining_po_quantity)}
-                      </td>
-                      <td className="px-4 py-3">{formatNumber(line.suggested_receipt_quantity)}</td>
-                      <td className="px-4 py-3">{formatCurrency(line.unit_cost)}</td>
+            <div className="space-y-4">
+              <div className="rounded-2xl border border-[#ebe4f7] bg-[#faf7ff] p-4 text-sm text-[#6e6487]">
+                <div className="font-semibold text-[#4d3188]">
+                  {suggestions.purchase_order.po_number} • {suggestions.purchase_order.supplier_name}
+                </div>
+                <div className="mt-1">
+                  Fill in lot, expiry, and serial details only for tracked items. Lines with receipt quantity
+                  set to 0 will not be included in the draft.
+                </div>
+              </div>
+
+              <div className="overflow-x-auto rounded-3xl border border-[#ebe4f7] bg-white">
+                <table className="min-w-[1400px] w-full">
+                  <thead className="bg-[#f7f2ff] text-left text-[#4d3188]">
+                    <tr>
+                      <th className="px-4 py-3">Product</th>
+                      <th className="px-4 py-3">Tracking</th>
+                      <th className="px-4 py-3">Requested Warehouse</th>
+                      <th className="px-4 py-3">PO Qty</th>
+                      <th className="px-4 py-3">Received</th>
+                      <th className="px-4 py-3">Open Qty</th>
+                      <th className="px-4 py-3">Receipt Qty</th>
+                      <th className="px-4 py-3">Lot Number</th>
+                      <th className="px-4 py-3">Expiry Date</th>
+                      <th className="px-4 py-3">Serial Numbers</th>
+                      <th className="px-4 py-3">Unit Cost</th>
                     </tr>
-                  ))}
-                </tbody>
-              </table>
+                  </thead>
+                  <tbody>
+                    {suggestions.items.map((line) => {
+                      const lineState = lineInputs[line.id] || createLineInput(line);
+                      const serialCount = normalizeSerialNumbers(lineState.serial_numbers_text).length;
+
+                      return (
+                        <tr key={line.id} className="border-t border-[#ebe4f7] align-top">
+                          <td className="px-4 py-3">
+                            <div className="font-medium text-[#4d3188]">{line.product_name}</div>
+                            <div className="text-xs text-[#7c7494]">{line.sku}</div>
+                          </td>
+
+                          <td className="px-4 py-3 text-sm text-[#6e6487]">
+                            {getTrackingLabel(line)}
+                          </td>
+
+                          <td className="px-4 py-3 text-sm text-[#6e6487]">
+                            {line.requested_warehouse_name
+                              ? `${line.warehouse_code} - ${line.warehouse_name}`
+                              : 'No requested warehouse'}
+                          </td>
+
+                          <td className="px-4 py-3">{formatNumber(line.quantity)}</td>
+                          <td className="px-4 py-3">{formatNumber(line.received_quantity)}</td>
+                          <td className="px-4 py-3 font-semibold text-[#4d3188]">
+                            {formatNumber(line.remaining_quantity)}
+                          </td>
+
+                          <td className="px-4 py-3">
+                            <input
+                              type="number"
+                              min="0"
+                              step="1"
+                              className={compactInputClassName}
+                              value={lineState.received_quantity}
+                              onChange={(e) =>
+                                handleLineInputChange(line.id, 'received_quantity', e.target.value)
+                              }
+                            />
+                          </td>
+
+                          <td className="px-4 py-3">
+                            <input
+                              type="text"
+                              className={compactInputClassName}
+                              value={lineState.lot_number}
+                              onChange={(e) =>
+                                handleLineInputChange(line.id, 'lot_number', e.target.value)
+                              }
+                              placeholder={isLotTracked(line) ? 'Required' : 'Optional'}
+                              disabled={!isLotTracked(line)}
+                            />
+                          </td>
+
+                          <td className="px-4 py-3">
+                            <input
+                              type="date"
+                              className={compactInputClassName}
+                              value={lineState.expiry_date}
+                              onChange={(e) =>
+                                handleLineInputChange(line.id, 'expiry_date', e.target.value)
+                              }
+                              disabled={!isExpiryTracked(line)}
+                            />
+                          </td>
+
+                          <td className="px-4 py-3">
+                            <textarea
+                              rows={3}
+                              className={compactInputClassName}
+                              value={lineState.serial_numbers_text}
+                              onChange={(e) =>
+                                handleLineInputChange(line.id, 'serial_numbers_text', e.target.value)
+                              }
+                              placeholder={
+                                isSerialTracked(line)
+                                  ? 'One serial per line, or separate by comma'
+                                  : 'Not required'
+                              }
+                              disabled={!isSerialTracked(line)}
+                            />
+                            {isSerialTracked(line) ? (
+                              <div className="mt-1 text-xs text-[#7c7494]">
+                                Current serial count: {serialCount}
+                              </div>
+                            ) : null}
+                          </td>
+
+                          <td className="px-4 py-3">{formatCurrency(line.unit_cost)}</td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
+              </div>
             </div>
           )}
         </div>
@@ -388,7 +649,10 @@ export default function GoodsReceiptsPage() {
             className={inputClassName}
             value={filters.purchase_order_id}
             onChange={(e) =>
-              setFilters((prev) => ({ ...prev, purchase_order_id: e.target.value }))
+              setFilters((prev) => ({
+                ...prev,
+                purchase_order_id: e.target.value,
+              }))
             }
           >
             <option value="">All purchase orders</option>
@@ -402,7 +666,12 @@ export default function GoodsReceiptsPage() {
           <select
             className={inputClassName}
             value={filters.status}
-            onChange={(e) => setFilters((prev) => ({ ...prev, status: e.target.value }))}
+            onChange={(e) =>
+              setFilters((prev) => ({
+                ...prev,
+                status: e.target.value,
+              }))
+            }
           >
             <option value="">All statuses</option>
             <option value="Draft">Draft</option>
@@ -479,9 +748,7 @@ export default function GoodsReceiptsPage() {
                     <p className="text-sm text-[#7c7494]">
                       Warehouse: {selectedGoodsReceipt.warehouse_code} - {selectedGoodsReceipt.warehouse_name}
                     </p>
-                    <p className="text-sm text-[#7c7494]">
-                      Status: {selectedGoodsReceipt.status}
-                    </p>
+                    <p className="text-sm text-[#7c7494]">Status: {selectedGoodsReceipt.status}</p>
                   </div>
 
                   <div>
@@ -498,31 +765,47 @@ export default function GoodsReceiptsPage() {
                   </div>
 
                   <div className="max-h-[420px] overflow-auto rounded-2xl border border-[#ebe4f7]">
-                    <table className="min-w-full">
+                    <table className="min-w-[980px] w-full">
                       <thead className="bg-[#f7f2ff] text-left text-[#4d3188]">
                         <tr>
                           <th className="px-3 py-2">Product</th>
                           <th className="px-3 py-2">Requested WH</th>
                           <th className="px-3 py-2">Receipt Qty</th>
+                          <th className="px-3 py-2">Lot</th>
+                          <th className="px-3 py-2">Expiry</th>
+                          <th className="px-3 py-2">Serials</th>
                           <th className="px-3 py-2">Unit Cost</th>
                         </tr>
                       </thead>
                       <tbody>
-                        {selectedGoodsReceipt.items?.map((item) => (
-                          <tr key={item.id} className="border-t border-[#ebe4f7]">
-                            <td className="px-3 py-2">
-                              <div className="font-medium text-[#4d3188]">{item.product_name}</div>
-                              <div className="text-xs text-[#7c7494]">{item.sku}</div>
-                            </td>
-                            <td className="px-3 py-2">
-                              {item.requested_warehouse_name
-                                ? `${item.requested_warehouse_code} - ${item.requested_warehouse_name}`
-                                : '—'}
-                            </td>
-                            <td className="px-3 py-2">{formatNumber(item.received_quantity)}</td>
-                            <td className="px-3 py-2">{formatCurrency(item.unit_cost)}</td>
-                          </tr>
-                        ))}
+                        {selectedGoodsReceipt.items?.map((item) => {
+                          const serials = Array.isArray(item.serial_numbers_json)
+                            ? item.serial_numbers_json
+                            : normalizeSerialNumbers(item.serial_numbers_json);
+
+                          return (
+                            <tr key={item.id} className="border-t border-[#ebe4f7] align-top">
+                              <td className="px-3 py-2">
+                                <div className="font-medium text-[#4d3188]">{item.product_name}</div>
+                                <div className="text-xs text-[#7c7494]">{item.sku}</div>
+                              </td>
+
+                              <td className="px-3 py-2">
+                                {item.requested_warehouse_name
+                                  ? `${item.requested_warehouse_code} - ${item.requested_warehouse_name}`
+                                  : '—'}
+                              </td>
+
+                              <td className="px-3 py-2">{formatNumber(item.received_quantity)}</td>
+                              <td className="px-3 py-2">{item.lot_number || '—'}</td>
+                              <td className="px-3 py-2">{item.expiry_date || '—'}</td>
+                              <td className="px-3 py-2">
+                                {serials.length ? serials.join(', ') : '—'}
+                              </td>
+                              <td className="px-3 py-2">{formatCurrency(item.unit_cost)}</td>
+                            </tr>
+                          );
+                        })}
                       </tbody>
                     </table>
                   </div>

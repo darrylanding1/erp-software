@@ -29,6 +29,13 @@ const getInitialFormData = () => ({
   country_of_origin: '',
   hs_code: '',
   notes: '',
+  image_url: '',
+  variant_group: '',
+  variant_attributes: '[]',
+  alternate_uoms: '[]',
+  vendor_item_mappings: '[]',
+  tax_metadata: '{}',
+  compliance_metadata: '{}',
   inventory_tracking_type: 'NONE',
   is_bin_managed: true,
   is_expiry_tracked: false,
@@ -80,6 +87,13 @@ export default function ProductForm({
         country_of_origin: editingProduct.country_of_origin || '',
         hs_code: editingProduct.hs_code || '',
         notes: editingProduct.notes || '',
+        image_url: editingProduct.image_url || '',
+        variant_group: editingProduct.variant_group || '',
+        variant_attributes: JSON.stringify(editingProduct.variant_attributes || [], null, 2),
+        alternate_uoms: JSON.stringify(editingProduct.alternate_uoms || [], null, 2),
+        vendor_item_mappings: JSON.stringify(editingProduct.vendor_item_mappings || [], null, 2),
+        tax_metadata: JSON.stringify(editingProduct.tax_metadata || {}, null, 2),
+        compliance_metadata: JSON.stringify(editingProduct.compliance_metadata || {}, null, 2),
         inventory_tracking_type: editingProduct.inventory_tracking_type || 'NONE',
         is_bin_managed: Number(editingProduct.is_bin_managed) === 1,
         is_expiry_tracked: Number(editingProduct.is_expiry_tracked) === 1,
@@ -279,6 +293,24 @@ export default function ProductForm({
               name="uom"
               placeholder="UOM"
               value={formData.uom}
+              onChange={handleChange}
+              className={inputClass}
+            />
+
+            <input
+              type="text"
+              name="image_url"
+              placeholder="Image URL (public only, no localhost)"
+              value={formData.image_url}
+              onChange={handleChange}
+              className={`${inputClass} md:col-span-2`}
+            />
+
+            <input
+              type="text"
+              name="variant_group"
+              placeholder="Variant Group (e.g. TSHIRT-CLASSIC)"
+              value={formData.variant_group}
               onChange={handleChange}
               className={inputClass}
             />
@@ -503,6 +535,51 @@ export default function ProductForm({
               value={formData.hs_code}
               onChange={handleChange}
               className={inputClass}
+            />
+
+            <textarea
+              name="tax_metadata"
+              placeholder='Tax Metadata JSON (e.g. {"vat_rate":12,"tax_class":"VATABLE"})'
+              value={formData.tax_metadata}
+              onChange={handleChange}
+              className={`${inputClass} md:col-span-2`}
+              rows={4}
+            />
+
+            <textarea
+              name="compliance_metadata"
+              placeholder='Compliance Metadata JSON (e.g. {"shelf_life_days":365,"regulated":false})'
+              value={formData.compliance_metadata}
+              onChange={handleChange}
+              className={`${inputClass} md:col-span-2`}
+              rows={4}
+            />
+
+            <textarea
+              name="variant_attributes"
+              placeholder='Variant Attributes JSON (e.g. [{"name":"color","value":"black"}])'
+              value={formData.variant_attributes}
+              onChange={handleChange}
+              className={`${inputClass} md:col-span-2`}
+              rows={4}
+            />
+
+            <textarea
+              name="alternate_uoms"
+              placeholder='Alternate UOM JSON (e.g. [{"uom":"BOX","factor":12}])'
+              value={formData.alternate_uoms}
+              onChange={handleChange}
+              className={`${inputClass} md:col-span-2`}
+              rows={4}
+            />
+
+            <textarea
+              name="vendor_item_mappings"
+              placeholder='Vendor Item Mappings JSON (e.g. [{"supplier_code":"ABC","vendor_sku":"ABC-001"}])'
+              value={formData.vendor_item_mappings}
+              onChange={handleChange}
+              className={`${inputClass} md:col-span-2 2xl:col-span-4`}
+              rows={4}
             />
 
             <textarea

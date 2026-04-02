@@ -43,6 +43,87 @@ const cleanText = (value) => {
   return trimmed ? trimmed : null;
 };
 
+const cleanJsonText = (value, fallback = null) => {
+  if (value === undefined || value === null || value === '') return fallback;
+
+  if (typeof value === 'string') {
+    const trimmed = value.trim();
+    return trimmed || fallback;
+  }
+
+  try {
+    return JSON.stringify(value);
+  } catch (error) {
+    return fallback;
+  }
+};
+
+const parseJsonText = (value, fallback) => {
+  if (!value) return fallback;
+
+  try {
+    return JSON.parse(value);
+  } catch (error) {
+    return fallback;
+  }
+};
+
+const sanitizeImageUrl = (value) => {
+  const cleaned = cleanText(value);
+
+  if (!cleaned) return null;
+
+  const lowered = cleaned.toLowerCase();
+  if (lowered.includes('localhost') || lowered.includes('127.0.0.1')) {
+    return null;
+  }
+
+  return cleaned;
+};
+
+const normalizeTrackingFlags = (payload) => {
+  const next = { ...payload };
+
+  if (next.item_type !== 'Inventory' || !next.track_inventory) {
+    next.inventory_tracking_type = 'NONE';
+    next.is_lot_tracked = false;
+    next.is_serial_tracked = false;
+    next.is_expiry_tracked = false;
+    return next;
+  }
+
+  if (next.inventory_tracking_type === 'LOT') {
+    next.is_lot_tracked = true;
+    next.is_serial_tracked = false;
+  } else if (next.inventory_tracking_type === 'SERIAL') {
+    next.is_lot_tracked = false;
+    next.is_serial_tracked = true;
+  } else {
+    next.is_lot_tracked = false;
+    next.is_serial_tracked = false;
+  }
+
+  if (next.picking_strategy === 'FEFO' && !next.is_expiry_tracked) {
+    next.picking_strategy = 'FIFO';
+  }
+
+  return next;
+};
+
+const shapeProductRow = (row) => {
+  if (!row) return null;
+
+  return {
+    ...row,
+    image_url: sanitizeImageUrl(row.image_url),
+    variant_attributes: parseJsonText(row.variant_attributes_json, []),
+    alternate_uoms: parseJsonText(row.alternate_uoms_json, []),
+    vendor_item_mappings: parseJsonText(row.vendor_item_mappings_json, []),
+    tax_metadata: parseJsonText(row.tax_metadata_json, {}),
+    compliance_metadata: parseJsonText(row.compliance_metadata_json, {}),
+  };
+};
+
 const getProductScopeClause = (scope, alias = 'p') =>
   buildScopeWhereClause(scope, {
     company: `${alias}.company_id`,
@@ -88,6 +169,13 @@ const getProductById = async (id, scope) => {
       p.country_of_origin,
       p.hs_code,
       p.notes,
+      p.image_url,
+      p.variant_group,
+      p.variant_attributes_json,
+      p.alternate_uoms_json,
+      p.vendor_item_mappings_json,
+      p.tax_metadata_json,
+      p.compliance_metadata_json,
       p.created_at,
       p.updated_at,
       p.inventory_tracking_type,
@@ -123,7 +211,7 @@ const getProductById = async (id, scope) => {
     [id, ...productScope.values]
   );
 
-  return rows[0] || null;
+  return shapeProductRow(rows[0] || null);
 };
 
 const validateProductPayload = async ({ productId = null, payload, scope }) => {
@@ -202,6 +290,38 @@ const validateProductPayload = async ({ productId = null, payload, scope }) => {
     errors.push('Only inventory items can track inventory');
   }
 
+  if (payload.track_inventory && payload.item_type === 'Inventory') {
+    if (payload.inventory_tracking_type === 'LOT' && !payload.is_lot_tracked) {
+      errors.push('LOT tracking type must enable lot tracking');
+    }
+
+    if (payload.inventory_tracking_type === 'SERIAL' && !payload.is_serial_tracked) {
+      errors.push('SERIAL tracking type must enable serial tracking');
+    }
+  }
+
+  if (payload.picking_strategy === 'FEFO' && !payload.is_expiry_tracked) {
+    errors.push('FEFO picking requires expiry tracking');
+  }
+
+  const jsonFields = [
+    ['variant_attributes_json', 'Variant attributes'],
+    ['alternate_uoms_json', 'Alternate UOM conversions'],
+    ['vendor_item_mappings_json', 'Vendor item mappings'],
+    ['tax_metadata_json', 'Tax metadata'],
+    ['compliance_metadata_json', 'Compliance metadata'],
+  ];
+
+  for (const [field, label] of jsonFields) {
+    if (!payload[field]) continue;
+
+    try {
+      JSON.parse(payload[field]);
+    } catch (error) {
+      errors.push(`${label} must be valid JSON`);
+    }
+  }
+
   if (productId) {
     const [[stockRow]] = await db.query(
       `
@@ -243,7 +363,7 @@ const mapRequestToProductPayload = (req) => {
   const trackInventory =
     itemType === 'Inventory' ? toBoolean(body.track_inventory, true) : false;
 
-  return {
+  return normalizeTrackingFlags({
     name: cleanText(body.name),
     description: cleanText(body.description),
     sku: cleanText(body.sku),
@@ -269,13 +389,20 @@ const mapRequestToProductPayload = (req) => {
     country_of_origin: cleanText(body.country_of_origin),
     hs_code: cleanText(body.hs_code),
     notes: cleanText(body.notes),
+    image_url: sanitizeImageUrl(body.image_url),
     inventory_tracking_type: cleanText(body.inventory_tracking_type) || 'NONE',
     is_bin_managed: toBoolean(body.is_bin_managed, true),
     is_expiry_tracked: toBoolean(body.is_expiry_tracked, false),
     picking_strategy: cleanText(body.picking_strategy) || 'FIFO',
     is_lot_tracked: toBoolean(body.is_lot_tracked, false),
     is_serial_tracked: toBoolean(body.is_serial_tracked, false),
-  };
+    variant_group: cleanText(body.variant_group),
+    variant_attributes_json: cleanJsonText(body.variant_attributes, '[]'),
+    alternate_uoms_json: cleanJsonText(body.alternate_uoms, '[]'),
+    vendor_item_mappings_json: cleanJsonText(body.vendor_item_mappings, '[]'),
+    tax_metadata_json: cleanJsonText(body.tax_metadata, '{}'),
+    compliance_metadata_json: cleanJsonText(body.compliance_metadata, '{}'),
+  });
 };
 
 export const getProductMeta = async (req, res) => {
@@ -370,6 +497,13 @@ export const getProducts = async (req, res) => {
         p.country_of_origin,
         p.hs_code,
         p.notes,
+        p.image_url,
+        p.variant_group,
+        p.variant_attributes_json,
+        p.alternate_uoms_json,
+        p.vendor_item_mappings_json,
+        p.tax_metadata_json,
+        p.compliance_metadata_json,
         p.created_at,
         p.updated_at,
         p.inventory_tracking_type,
@@ -451,7 +585,7 @@ export const getProducts = async (req, res) => {
     sql += ' ORDER BY p.id DESC';
 
     const [rows] = await db.query(sql, values);
-    res.json(rows);
+    res.json(rows.map(shapeProductRow));
   } catch (error) {
     console.error('Get products error:', error);
     res.status(error.statusCode || 500).json({ message: error.message || 'Failed to fetch products' });
@@ -503,6 +637,12 @@ export const createProduct = async (req, res) => {
         country_of_origin,
         hs_code,
         notes,
+        variant_group,
+        variant_attributes_json,
+        alternate_uoms_json,
+        vendor_item_mappings_json,
+        tax_metadata_json,
+        compliance_metadata_json,
         image_url,
         quantity,
         status,
@@ -517,7 +657,7 @@ export const createProduct = async (req, res) => {
         business_unit_id
       )
       VALUES
-      (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, 0, 'Out of Stock', ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, 'Out of Stock', ?, ?, ?, ?, ?, ?, ?, ?, ?)
       `,
       [
         payload.name,
@@ -545,6 +685,13 @@ export const createProduct = async (req, res) => {
         payload.country_of_origin,
         payload.hs_code,
         payload.notes,
+        payload.variant_group,
+        payload.variant_attributes_json,
+        payload.alternate_uoms_json,
+        payload.vendor_item_mappings_json,
+        payload.tax_metadata_json,
+        payload.compliance_metadata_json,
+        payload.image_url,
         payload.inventory_tracking_type,
         payload.is_bin_managed ? 1 : 0,
         payload.is_expiry_tracked ? 1 : 0,
@@ -643,7 +790,13 @@ export const updateProduct = async (req, res) => {
         country_of_origin = ?,
         hs_code = ?,
         notes = ?,
-        image_url = NULL,
+        variant_group = ?,
+        variant_attributes_json = ?,
+        alternate_uoms_json = ?,
+        vendor_item_mappings_json = ?,
+        tax_metadata_json = ?,
+        compliance_metadata_json = ?,
+        image_url = ?,
         inventory_tracking_type = ?,
         is_bin_managed = ?,
         is_expiry_tracked = ?,
@@ -681,6 +834,13 @@ export const updateProduct = async (req, res) => {
         payload.country_of_origin,
         payload.hs_code,
         payload.notes,
+        payload.variant_group,
+        payload.variant_attributes_json,
+        payload.alternate_uoms_json,
+        payload.vendor_item_mappings_json,
+        payload.tax_metadata_json,
+        payload.compliance_metadata_json,
+        payload.image_url,
         payload.inventory_tracking_type,
         payload.is_bin_managed ? 1 : 0,
         payload.is_expiry_tracked ? 1 : 0,

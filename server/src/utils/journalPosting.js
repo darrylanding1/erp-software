@@ -27,20 +27,33 @@ export const createJournalEntry = async (
     allowDuplicateReference = false,
     allowSoftClosedForAdmin = false,
     userRole = '',
-  }
+  } = {}
 ) => {
-  const resolvedScope =
-    scope ||
-    {
-      company_id,
-      branch_id,
-      business_unit_id,
-    };
+  const finalEntryDate = entryDate || entry_date || null;
+  const finalReferenceType = referenceType || reference_type || null;
+  const finalReferenceId = referenceId || reference_id || null;
+
+  const resolvedScope = scope || {
+    company_id,
+    branch_id,
+    business_unit_id,
+  };
+
+  const totalDebit = lines.reduce((sum, line) => sum + Number(line?.debit || 0), 0);
+  const totalCredit = lines.reduce((sum, line) => sum + Number(line?.credit || 0), 0);
+
+  if (!finalEntryDate || !finalReferenceType || !finalReferenceId) {
+    throw new Error('Invalid journal entry payload');
+  }
+
+  if (Math.abs(totalDebit - totalCredit) > 0.0001) {
+    throw new Error('Journal entry not balanced');
+  }
 
   return createGLJournalEntry(connection, {
-    entryDate: entryDate || entry_date,
-    referenceType: referenceType || reference_type || null,
-    referenceId: referenceId || reference_id || null,
+    entryDate: finalEntryDate,
+    referenceType: finalReferenceType,
+    referenceId: finalReferenceId,
     memo: memo || null,
     lines,
     status,
