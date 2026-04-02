@@ -1,150 +1,72 @@
-import { useState } from 'react';
-import { Navigate, useLocation, useNavigate } from 'react-router-dom';
-import { useAuth } from '../contexts/AuthContext';
+import { useState } from "react";
+import { useAuth } from "../contexts/AuthContext";
 
 export default function LoginPage() {
-  const navigate = useNavigate();
-  const location = useLocation();
-  const { login, isAuthenticated } = useAuth();
-
-  const [form, setForm] = useState({
-    email: '',
-    password: '',
-  });
-
+  const { login } = useAuth();
   const [loading, setLoading] = useState(false);
-  const [error, setError] = useState('');
 
-  const from = location.state?.from?.pathname || '/';
+  // 🔒 Fixed credentials
+  const email = "admin@inventorypro.local";
+  const password = "Admin@123";
 
-  if (isAuthenticated) {
-    return <Navigate to="/" replace />;
-  }
-
-  const handleSubmit = async (event) => {
-    event.preventDefault();
+  const handleSubmit = async (e) => {
+    e.preventDefault();
     setLoading(true);
-    setError('');
 
     try {
-      await login(form);
-      navigate(from, { replace: true });
-    } catch (err) {
-      console.error('Login failed:', err);
-      setError(err?.response?.data?.message || 'Failed to sign in');
+      await login(email, password);
+    } catch (error) {
+      console.error("Login failed:", error);
     } finally {
       setLoading(false);
     }
   };
 
   return (
-    <div className="flex min-h-screen items-center justify-center bg-[#f8f5ff] px-4 py-8">
-      <div className="grid w-full max-w-5xl overflow-hidden rounded-[2rem] border border-[#ebe4f7] bg-white shadow-xl lg:grid-cols-[1.1fr_0.9fr]">
-        <div className="hidden bg-gradient-to-br from-[#efe4ff] via-[#f8f5ff] to-[#fff8eb] p-10 lg:block">
-          <div className="max-w-md">
-            <p className="inline-flex rounded-full bg-white px-4 py-2 text-xs font-semibold uppercase tracking-[0.25em] text-[#6d3fd1] shadow-sm">
-              Inventory Pro
-            </p>
+    <div className="flex items-center justify-center min-h-screen bg-gray-100">
+      <form
+        onSubmit={handleSubmit}
+        className="bg-white p-6 rounded-lg shadow-md w-96"
+      >
+        <h2 className="text-2xl font-bold mb-4 text-center">
+          System Login
+        </h2>
 
-            <h1 className="mt-6 text-4xl font-bold leading-tight text-[#4d3188]">
-              Secure access for your inventory and ERP workflows.
-            </h1>
-
-            <p className="mt-4 text-base leading-7 text-[#6e6487]">
-              This build adds hashed passwords, JWT authentication, role-based access control,
-              frontend route guards, and audit trail logging for sensitive actions.
-            </p>
-          </div>
+        {/* EMAIL */}
+        <div className="mb-4">
+          <label className="block text-sm font-medium mb-1">
+            Email
+          </label>
+          <input
+            type="email"
+            value={email}
+            readOnly
+            className="w-full px-3 py-2 border rounded bg-gray-100 cursor-not-allowed"
+          />
         </div>
 
-        <div className="p-6 sm:p-10">
-          <div className="mx-auto w-full max-w-md">
-            <h2 className="text-3xl font-bold text-[#4d3188]">Sign in</h2>
-
-            <p className="mt-2 text-sm text-[#7c7494]">
-              Use your system email and password.
-            </p>
-
-            <form
-              onSubmit={handleSubmit}
-              className="mt-8 space-y-4"
-              name="login_form"
-              autoComplete="on"
-            >
-              <div>
-                <label
-                  htmlFor="login_email"
-                  className="mb-2 block text-sm font-medium text-[#5f547c]"
-                >
-                  Email
-                </label>
-
-                <input
-                  id="login_email"
-                  name="email"
-                  type="email"
-                  autoComplete="email"
-                  inputMode="email"
-                  value={form.email}
-                  onChange={(e) =>
-                    setForm((prev) => ({
-                      ...prev,
-                      email: e.target.value,
-                    }))
-                  }
-                  className="w-full rounded-2xl border border-[#ebe4f7] px-4 py-3 outline-none focus:border-[#9b6bff]"
-                  placeholder="you@example.com"
-                  required
-                />
-              </div>
-
-              <div>
-                <label
-                  htmlFor="login_password"
-                  className="mb-2 block text-sm font-medium text-[#5f547c]"
-                >
-                  Password
-                </label>
-
-                <input
-                  id="login_password"
-                  name="password"
-                  type="password"
-                  autoComplete="current-password"
-                  value={form.password}
-                  onChange={(e) =>
-                    setForm((prev) => ({
-                      ...prev,
-                      password: e.target.value,
-                    }))
-                  }
-                  className="w-full rounded-2xl border border-[#ebe4f7] px-4 py-3 outline-none focus:border-[#9b6bff]"
-                  placeholder="Enter your password"
-                  required
-                />
-              </div>
-
-              {error ? (
-                <div
-                  className="rounded-2xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-700"
-                  role="alert"
-                  aria-live="polite"
-                >
-                  {error}
-                </div>
-              ) : null}
-
-              <button
-                type="submit"
-                disabled={loading}
-                className="w-full rounded-2xl bg-[#9b6bff] px-4 py-3 font-semibold text-white transition hover:bg-[#8756f0] disabled:cursor-not-allowed disabled:opacity-70"
-              >
-                {loading ? 'Signing in...' : 'Sign in'}
-              </button>
-            </form>
-          </div>
+        {/* PASSWORD */}
+        <div className="mb-4">
+          <label className="block text-sm font-medium mb-1">
+            Password
+          </label>
+          <input
+            type="text"
+            value={password}
+            readOnly
+            className="w-full px-3 py-2 border rounded bg-gray-100 cursor-not-allowed"
+          />
         </div>
-      </div>
+
+        {/* BUTTON */}
+        <button
+          type="submit"
+          disabled={loading}
+          className="w-full bg-blue-600 text-white py-2 rounded hover:bg-blue-700 transition"
+        >
+          {loading ? "Signing in..." : "Sign In"}
+        </button>
+      </form>
     </div>
   );
 }
