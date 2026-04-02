@@ -20,50 +20,39 @@ export default function ProductCard({ product, onEdit, onDelete }) {
               <h3 className="font-bold text-[#4d3188]">{product.name}</h3>
               <p className="text-sm text-[#7c7494]">SKU: {product.sku}</p>
               <p className="text-sm text-[#7c7494]">Type: {product.item_type}</p>
-              <p className="text-sm text-[#7c7494]">
-                Category: {product.category_name || '-'}
-              </p>
+              <p className="text-sm text-[#7c7494]">Item Status: {product.item_status}</p>
+              <p className="text-sm text-[#7c7494]">Category: {product.category_name || '-'}</p>
             </div>
 
-            <span
-              className={`inline-block rounded-full px-3 py-1 text-xs font-medium ${badgeClassByStatus(
-                product.status
-              )}`}
-            >
+            <span className={`inline-block rounded-full px-3 py-1 text-xs font-medium ${badgeClassByStatus(product.status)}`}>
               {product.status}
             </span>
           </div>
 
           <div className="mt-3 grid grid-cols-2 gap-3 text-sm">
             <div className="rounded-xl bg-[#fcfaff] p-3">
-              <p className="text-[#7c7494]">Brand</p>
-              <p className="font-semibold text-[#2b2340]">{product.brand || '-'}</p>
+              <p className="text-[#7c7494]">Base UOM</p>
+              <p className="font-semibold text-[#2b2340]">{product.base_uom_code || '-'}</p>
             </div>
-
             <div className="rounded-xl bg-[#fcfaff] p-3">
-              <p className="text-[#7c7494]">UOM</p>
-              <p className="font-semibold text-[#2b2340]">{product.uom || '-'}</p>
+              <p className="text-[#7c7494]">Valuation</p>
+              <p className="font-semibold text-[#2b2340]">{product.valuation_method || '-'}</p>
             </div>
-
             <div className="rounded-xl bg-[#fcfaff] p-3">
               <p className="text-[#7c7494]">Cost</p>
-              <p className="font-semibold text-[#2b2340]">
-                ₱{Number(product.standard_cost).toFixed(2)}
-              </p>
+              <p className="font-semibold text-[#2b2340]">₱{Number(product.standard_cost || 0).toFixed(2)}</p>
             </div>
-
             <div className="rounded-xl bg-[#fcfaff] p-3">
               <p className="text-[#7c7494]">Sell</p>
-              <p className="font-semibold text-[#2b2340]">
-                ₱{Number(product.selling_price).toFixed(2)}
-              </p>
+              <p className="font-semibold text-[#2b2340]">₱{Number(product.selling_price || 0).toFixed(2)}</p>
             </div>
-
-            <div className="rounded-xl bg-[#fcfaff] p-3 col-span-2">
+            <div className="rounded-xl bg-[#fcfaff] p-3">
               <p className="text-[#7c7494]">Quantity</p>
-              <p className="font-semibold text-[#2b2340]">
-                {Number(product.quantity).toFixed(2)}
-              </p>
+              <p className="font-semibold text-[#2b2340]">{Number(product.quantity || 0).toFixed(2)}</p>
+            </div>
+            <div className="rounded-xl bg-[#fcfaff] p-3">
+              <p className="text-[#7c7494]">Procurement</p>
+              <p className="font-semibold text-[#2b2340]">{product.procurement_type || '-'}</p>
             </div>
           </div>
 
