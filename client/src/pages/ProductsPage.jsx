@@ -7,7 +7,7 @@ import PageHeader from '../components/common/PageHeader';
 import SectionCard from '../components/common/SectionCard';
 import AppButton from '../components/common/AppButton';
 import EmptyState from '../components/common/EmptyState';
-import { getProducts, deleteProducat, getProductMeta } from '../services/productService';
+import { getProducts, deleteProduct, getProductMeta } from '../services/productService';
 
 const initialEnums = {
   itemTypes: [],
