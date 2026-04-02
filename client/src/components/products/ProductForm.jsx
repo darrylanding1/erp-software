@@ -324,7 +324,7 @@ export default function ProductForm({
       <div className="flex items-center justify-between gap-4">
         <div>
           <h2 className="text-lg font-bold text-[#4d3188] sm:text-xl">
-            {editingProduct ? 'Edit SAP-Level Item Master' : 'Add SAP-Level Item Master'}
+            {editingProduct ? 'Edit Item Master' : 'Add Item Master'}
           </h2>
           <p className="mt-1 text-sm text-[#7c7494]">
             Governance, multi-UOM, MRP, tax, quality, variant, and accounting configuration in one material master.

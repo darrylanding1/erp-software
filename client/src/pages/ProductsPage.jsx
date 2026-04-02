@@ -136,7 +136,7 @@ export default function ProductsPage() {
   return (
     <div className="space-y-4 sm:space-y-5 lg:space-y-6">
       <PageHeader
-        title="SAP-Level Product & Item Master"
+        title="Product & Item Master"
         subtitle="Manage item governance, multi-UOM, inventory controls, MRP defaults, tax setup, variant structure, and accounting references."
         stats={stats}
       />
